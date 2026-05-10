@@ -1,10 +1,11 @@
 // Leaderboard table — the headline view at /.
 //
-// Server-component-friendly (no 'use client'): renders straight from the
-// server-loaded JSON data. Sortable in-browser would need 'use client' +
-// state; deliberately deferred — the default sort by GDI desc is the
-// right one for the read.
+// Visual hierarchy: rank, pool name, GDI, vs-baseline are primary
+// (heavy text); DC sub-scores + NIS are secondary (lighter). A
+// horizontal divider row separates above-baseline from below-baseline
+// pools so the "good vs bad" read is instant.
 
+import { Fragment } from 'react';
 import Link from 'next/link';
 import { ArrowDown, ArrowUp, Minus } from 'lucide-react';
 import type { FormattedBaseline, FormattedScore } from '@/lib/data';
@@ -16,13 +17,12 @@ type Props = {
 };
 
 const fmt = {
-  num: (v: number | null, digits = 2) =>
-    v == null ? '—' : v.toFixed(digits),
-  pct: (v: number | null) =>
-    v == null ? '—' : `${(v * 100).toFixed(1)}%`,
+  num: (v: number | null, digits = 2) => (v == null ? '—' : v.toFixed(digits)),
+  pct: (v: number | null) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`),
   sol: (v: number | null) => {
     if (v == null) return '—';
     if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+    if (v >= 10_000) return `${(v / 1_000).toFixed(0)}k`;
     if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
     return v.toFixed(0);
   },
@@ -44,20 +44,27 @@ function comparisonToBaseline(
 
 export function Leaderboard({ pools, baseline, epoch }: Props) {
   const sorted = [...pools].sort((a, b) => (b.gdi ?? -Infinity) - (a.gdi ?? -Infinity));
+  const baselineGdi = baseline?.gdi ?? null;
+
+  // Index of the first below-baseline pool — used to insert the divider row.
+  const firstBelowIndex =
+    baselineGdi == null
+      ? -1
+      : sorted.findIndex((p) => (p.gdi ?? -Infinity) <= baselineGdi);
 
   return (
     <div className="surface overflow-x-auto">
       <table className="w-full text-sm">
-        <thead className="bg-bg-muted/40 text-left text-xs uppercase tracking-[0.10em] text-ink-dim">
+        <thead className="bg-bg-muted/40 text-left text-xs uppercase tracking-[0.12em] text-ink-dim">
           <tr>
             <th className="py-3 pl-5 pr-3 font-semibold">#</th>
             <th className="py-3 pr-3 font-semibold">Pool</th>
             <th className="py-3 pr-3 text-right font-semibold">GDI</th>
             <th className="py-3 pr-3 text-right font-semibold">vs baseline</th>
-            <th className="py-3 pr-3 text-right font-semibold">DC country</th>
-            <th className="py-3 pr-3 text-right font-semibold">DC city</th>
-            <th className="py-3 pr-3 text-right font-semibold">DC ASN</th>
-            <th className="py-3 pr-3 text-right font-semibold">NIS</th>
+            <th className="hidden py-3 pr-3 text-right font-semibold sm:table-cell">DC country</th>
+            <th className="hidden py-3 pr-3 text-right font-semibold sm:table-cell">DC city</th>
+            <th className="hidden py-3 pr-3 text-right font-semibold sm:table-cell">DC ASN</th>
+            <th className="hidden py-3 pr-3 text-right font-semibold lg:table-cell">NIS</th>
             <th className="py-3 pr-3 text-right font-semibold">Validators</th>
             <th className="py-3 pr-5 text-right font-semibold">Stake</th>
           </tr>
@@ -71,43 +78,70 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
             </tr>
           )}
           {sorted.map((p, i) => {
-            const cmp = comparisonToBaseline(p.gdi, baseline?.gdi ?? null);
+            const cmp = comparisonToBaseline(p.gdi, baselineGdi);
+            const showDivider = i === firstBelowIndex && i > 0;
+            const aboveBaseline = cmp.dir === 'up';
             return (
-              <tr key={p.pool_address} className="border-t border-ring transition hover:bg-bg-muted/40">
-                <td className="num py-3 pl-5 pr-3 text-ink-dim">{i + 1}</td>
-                <td className="py-3 pr-3">
-                  <Link
-                    href={`/pools/${p.pool_address}`}
-                    className="font-medium text-ink hover:underline"
+              <Fragment key={p.pool_address}>
+                {showDivider && (
+                  <tr aria-hidden="true">
+                    <td colSpan={10} className="py-2">
+                      <div className="flex items-center gap-3 text-xs uppercase tracking-[0.18em] text-ink-dim">
+                        <span className="h-px flex-1 bg-ring" />
+                        <span>← network baseline · GDI {fmt.num(baselineGdi, 2)} →</span>
+                        <span className="h-px flex-1 bg-ring" />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                <tr
+                  className={`border-t border-ring transition hover:bg-bg-muted/40 ${
+                    aboveBaseline ? '' : 'opacity-90'
+                  }`}
+                >
+                  <td className="num py-3 pl-5 pr-3 text-ink-dim">{i + 1}</td>
+                  <td className="py-3 pr-3">
+                    <Link
+                      href={`/pools/${p.pool_address}`}
+                      className="font-medium text-ink hover:underline"
+                    >
+                      {p.pool_name || fmt.addr(p.pool_address)}
+                    </Link>
+                    <div className="font-mono text-xs text-ink-dim">{fmt.addr(p.pool_address)}</div>
+                  </td>
+                  <td
+                    className={`num py-3 pr-3 text-right font-display text-base font-semibold ${
+                      aboveBaseline ? 'text-success' : cmp.dir === 'down' ? 'text-bad' : 'text-ink'
+                    }`}
                   >
-                    {p.pool_name || fmt.addr(p.pool_address)}
-                  </Link>
-                  <div className="font-mono text-xs text-ink-dim">{fmt.addr(p.pool_address)}</div>
-                </td>
-                <td className="num py-3 pr-3 text-right font-semibold">{fmt.num(p.gdi, 3)}</td>
-                <td className="num py-3 pr-3 text-right">
-                  <span
-                    className={
-                      cmp.dir === 'up'
-                        ? 'inline-flex items-center gap-1 text-success'
-                        : cmp.dir === 'down'
-                          ? 'inline-flex items-center gap-1 text-bad'
-                          : 'inline-flex items-center gap-1 text-ink-dim'
-                    }
-                  >
-                    {cmp.dir === 'up' && <ArrowUp className="h-3 w-3" />}
-                    {cmp.dir === 'down' && <ArrowDown className="h-3 w-3" />}
-                    {cmp.dir === 'eq' && <Minus className="h-3 w-3" />}
-                    {cmp.pct == null ? '—' : `${cmp.pct >= 0 ? '+' : ''}${cmp.pct.toFixed(1)}%`}
-                  </span>
-                </td>
-                <td className="num py-3 pr-3 text-right text-ink-muted">{fmt.num(p.dc_country, 2)}</td>
-                <td className="num py-3 pr-3 text-right text-ink-muted">{fmt.num(p.dc_city, 2)}</td>
-                <td className="num py-3 pr-3 text-right text-ink-muted">{fmt.num(p.dc_asn, 2)}</td>
-                <td className="num py-3 pr-3 text-right text-ink-muted">{fmt.num(p.nis, 1)}</td>
-                <td className="num py-3 pr-3 text-right text-ink-muted">{p.validator_count ?? '—'}</td>
-                <td className="num py-3 pr-5 text-right text-ink-muted">{fmt.sol(p.total_stake_sol)} SOL</td>
-              </tr>
+                    {fmt.num(p.gdi, 2)}
+                  </td>
+                  <td className="num py-3 pr-3 text-right">
+                    <span
+                      className={
+                        cmp.dir === 'up'
+                          ? 'inline-flex items-center gap-1 text-success'
+                          : cmp.dir === 'down'
+                            ? 'inline-flex items-center gap-1 text-bad'
+                            : 'inline-flex items-center gap-1 text-ink-dim'
+                      }
+                    >
+                      {cmp.dir === 'up' && <ArrowUp className="h-3 w-3" />}
+                      {cmp.dir === 'down' && <ArrowDown className="h-3 w-3" />}
+                      {cmp.dir === 'eq' && <Minus className="h-3 w-3" />}
+                      {cmp.pct == null
+                        ? '—'
+                        : `${cmp.pct >= 0 ? '+' : ''}${cmp.pct.toFixed(1)}%`}
+                    </span>
+                  </td>
+                  <td className="num hidden py-3 pr-3 text-right text-ink-dim sm:table-cell">{fmt.num(p.dc_country, 2)}</td>
+                  <td className="num hidden py-3 pr-3 text-right text-ink-dim sm:table-cell">{fmt.num(p.dc_city, 2)}</td>
+                  <td className="num hidden py-3 pr-3 text-right text-ink-dim sm:table-cell">{fmt.num(p.dc_asn, 2)}</td>
+                  <td className="num hidden py-3 pr-3 text-right text-ink-dim lg:table-cell">{fmt.num(p.nis, 1)}</td>
+                  <td className="num py-3 pr-3 text-right text-ink-muted">{p.validator_count ?? '—'}</td>
+                  <td className="num py-3 pr-5 text-right text-ink-muted">{fmt.sol(p.total_stake_sol)} SOL</td>
+                </tr>
+              </Fragment>
             );
           })}
         </tbody>
