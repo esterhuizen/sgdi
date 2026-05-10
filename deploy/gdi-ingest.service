@@ -1,0 +1,42 @@
+# /etc/systemd/system/gdi-ingest.service
+#
+# Oneshot — fired by gdi-ingest.timer every 30 min. Runs the ingest pipeline
+# (detect epoch → snapshot pools → enrich validators → score → baseline)
+# followed by the publish step (regenerate static JSON files).
+#
+# Idempotent: if the current epoch was already ingested, the ingest step
+# bails immediately and publish runs anyway (regenerates the JSONs from
+# whatever's in SQLite — useful after a methodology bump).
+#
+# Reads HELIUS_RPC_URL + VALIDATORS_APP_TOKEN from /etc/default/sgdi.env
+# (chmod 600, root-only — never committed).
+
+[Unit]
+Description=SGDI ingest + publish cycle
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Same user as sgdi.service — see that unit for the override-via-drop-in pattern.
+User=sgdi
+Group=sgdi
+WorkingDirectory=/var/www/sgdi/current
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=SGDI_DB_PATH=/var/lib/sgdi/gdi.db
+Environment=SGDI_LOG_DIR=/var/lib/sgdi/logs
+Environment=SGDI_PUBLISHED_DIR=/var/lib/sgdi/published
+EnvironmentFile=-/etc/default/sgdi.env
+ExecStart=/usr/bin/bash deploy/gdi-cycle.sh
+TimeoutStartSec=300
+
+# Hardening — same template as pool-stats.service
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/www/sgdi /var/lib/sgdi
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true

@@ -1,0 +1,19 @@
+# /etc/systemd/system/gdi-ingest.timer
+#
+# Every 30 min. Most fires are no-ops — the ingest script bails immediately
+# when the current epoch has already been ingested. The full pipeline only
+# runs once per epoch (≈ 2-3 days).
+#
+# Enable: sudo systemctl daemon-reload && sudo systemctl enable --now gdi-ingest.timer
+
+[Unit]
+Description=SGDI ingest cycle (every 30 min)
+
+[Timer]
+OnCalendar=*:0/30
+RandomizedDelaySec=2min
+Persistent=true
+Unit=gdi-ingest.service
+
+[Install]
+WantedBy=timers.target

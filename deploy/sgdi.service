@@ -1,0 +1,49 @@
+# /etc/systemd/system/sgdi.service
+#
+# Runs the SGDI Next.js standalone server. Listens on 127.0.0.1:4400; nginx
+# fronts it on sgdi.app:443. Reads published JSON files from
+# SGDI_PUBLISHED_DIR (which is also where nginx aliases /gdi/* from).
+#
+# After install: sudo systemctl daemon-reload && sudo systemctl enable --now sgdi
+
+[Unit]
+Description=SGDI website (Next.js standalone)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Default to a service-named user. Operators can override via a per-host
+# drop-in at /etc/systemd/system/sgdi.service.d/host-user.conf if they're
+# reusing an existing user (e.g. an existing operator's deployment user).
+User=sgdi
+Group=sgdi
+WorkingDirectory=/var/www/sgdi/current
+Environment=NODE_ENV=production
+Environment=PORT=4400
+Environment=HOSTNAME=127.0.0.1
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=SGDI_PUBLISHED_DIR=/var/lib/sgdi/published
+ExecStart=/usr/bin/node /var/www/sgdi/current/.next/standalone/server.js
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# Hardening — same template as definity.service
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+# MemoryDenyWriteExecute removed: incompatible with V8 JIT (SIGTRAP on baseline-compile).
+ReadWritePaths=/var/www/sgdi /var/lib/sgdi
+
+[Install]
+WantedBy=multi-user.target
