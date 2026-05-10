@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { loadPoolLatest, loadPoolHistory, loadNetworkBaseline } from '@/lib/data';
+import { GdiLink } from '@/components/GdiLink';
 import { TrendChart } from '@/components/TrendChart';
 
 export const revalidate = 60;
@@ -75,7 +76,7 @@ export default async function PoolDetailPage({ params }: Props) {
       {/* Score summary — leads with rank, sub-scores explain the components */}
       <section className="mt-10 grid gap-4 md:grid-cols-4">
         <div className="surface p-5">
-          <div className="text-xs uppercase tracking-wider text-ink-dim">GDI</div>
+          <div className="text-xs uppercase tracking-wider text-ink-dim"><GdiLink /></div>
           <div className="num mt-2 text-3xl font-semibold text-ink">{fmt.num(latest.score.gdi, 3)}</div>
           {latest.rank != null && latest.total_ranked > 0 ? (
             <div className="mt-1 text-xs text-ink-muted">

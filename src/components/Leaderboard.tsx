@@ -3,6 +3,7 @@
 // the three sub-scores are visible but de-emphasised.
 
 import Link from 'next/link';
+import { GdiLink } from '@/components/GdiLink';
 import type { FormattedBaseline, FormattedScore } from '@/lib/data';
 
 type Props = {
@@ -33,7 +34,7 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
           <tr>
             <th className="py-3 pl-5 pr-3 font-semibold">#</th>
             <th className="py-3 pr-3 font-semibold">Pool</th>
-            <th className="py-3 pr-3 text-right font-semibold">GDI</th>
+            <th className="py-3 pr-3 text-right font-semibold"><GdiLink /></th>
             <th className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell">country</th>
             <th className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell">city</th>
             <th className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell">asn</th>
@@ -86,7 +87,7 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
       </table>
       {baseline && (
         <div className="border-t border-ring bg-bg-muted/30 px-5 py-3 text-xs text-ink-muted">
-          For reference, the network-wide average GDI across all{' '}
+          For reference, the network-wide average <GdiLink /> across all{' '}
           <span className="num">{baseline.validator_count ?? '—'}</span> active Solana validators is{' '}
           <span className="num font-medium text-ink-muted">{fmt.num(baseline.gdi, 2)}</span>.{' '}
           <Link href="/methodology" className="underline decoration-ring underline-offset-2 hover:text-ink">

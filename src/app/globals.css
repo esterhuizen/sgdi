@@ -2,14 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────
+ * Theme tokens — both light and dark live here as CSS vars so
+ * the same Tailwind class names render correctly in either mode.
+ * The light/dark split is controlled by a class on <html>
+ * (set by the no-flash inline script in layout.tsx).
+ * ─────────────────────────────────────────────────────────── */
+
 :root {
+  /* Light theme (default) */
+  --color-bg:        255 255 255;       /* page background */
+  --color-bg-muted: 247 247 249;        /* one-step elevation */
+  --color-bg-tint:  250 251 255;        /* faintest tint, e.g. hero halo */
+  --color-surface:  255 255 255;        /* cards */
+  --color-ring:     236 237 243;        /* borders, dividers */
+  --color-ink:        13  16  20;       /* primary text */
+  --color-ink-muted:  82  86 106;       /* secondary text */
+  --color-ink-dim:   138 142 158;       /* tertiary text, labels */
+  --color-success:    34 163 108;       /* "data-good" */
+  --color-bad:       194  54  74;       /* "data-bad" */
+
+  /* Solana accent — used ONLY for the top stripe in both themes */
+  --color-accent-green: 20 241 149;
+  --color-accent-purple: 153 69 255;
+
   color-scheme: light;
+}
+
+html.dark {
+  /* Dark theme — institutional dark, not crypto neon. Borrowed temperatures
+     from GitHub's dark default + Bloomberg-terminal restraint. */
+  --color-bg:        10  13  18;        /* page bg, near-black with a hint of blue */
+  --color-bg-muted:  20  25  32;        /* one-step up */
+  --color-bg-tint:   15  19  25;        /* hero halo / faintest */
+  --color-surface:   18  22  29;        /* cards (1 shade lighter than bg) */
+  --color-ring:      36  42  53;        /* borders, dividers */
+  --color-ink:      230 237 243;        /* primary text — soft white, not pure */
+  --color-ink-muted:139 148 158;        /* secondary text */
+  --color-ink-dim:  110 118 129;        /* tertiary text, labels */
+  --color-success:   63 185 122;        /* data-good (lifted for dark contrast) */
+  --color-bad:      218  90 110;        /* data-bad */
+
+  color-scheme: dark;
 }
 
 html {
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
   font-feature-settings: 'tnum';
+  background-color: rgb(var(--color-bg));
+  color: rgb(var(--color-ink));
 }
 
 body {
@@ -22,16 +64,22 @@ body {
   }
 
   .surface {
-    @apply rounded-xl border border-ring bg-bg shadow-sm;
+    @apply rounded-xl border border-ring bg-surface shadow-sm;
   }
 
   .pill {
     @apply inline-flex items-center rounded-full border border-ring bg-bg-muted px-2.5 py-0.5 text-xs font-medium text-ink-muted;
   }
 
-  /* Tabular numerics on every numeric cell — non-negotiable for a data site. */
+  /* Tabular monospace numerics — non-negotiable for a data site.
+     The mono face is JetBrains Mono (loaded via next/font in layout.tsx).
+     !important on font-family guarantees mono wins over a co-applied
+     `font-display` Tailwind utility (same specificity = order would otherwise
+     decide). `.num` is the semantic marker for "this is data, render it mono". */
   .num {
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
     font-variant-numeric: tabular-nums;
-    font-feature-settings: 'tnum';
+    font-feature-settings: 'tnum', 'zero';
+    letter-spacing: -0.01em;
   }
 }

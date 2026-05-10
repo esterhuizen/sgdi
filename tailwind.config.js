@@ -1,41 +1,42 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ['./src/**/*.{ts,tsx}'],
+  // Class-based dark mode — toggled by <html class="dark"> which is set by
+  // the no-flash inline script in layout.tsx (reads localStorage + system pref).
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        // Academic / data-visualisation palette — calm, neutral, light.
-        // Solana brand greens / purples used sparingly for accent only.
+        // Token values are CSS variables from globals.css. This means every
+        // utility (bg-bg, text-ink, border-ring, etc.) renders correctly in
+        // both light and dark with zero `dark:` modifier sprinkled in markup.
         ink: {
-          DEFAULT: '#0d1014',
-          muted: '#52566a',
-          dim: '#8a8e9e',
+          DEFAULT: 'rgb(var(--color-ink) / <alpha-value>)',
+          muted: 'rgb(var(--color-ink-muted) / <alpha-value>)',
+          dim: 'rgb(var(--color-ink-dim) / <alpha-value>)',
         },
         bg: {
-          DEFAULT: '#ffffff',
-          muted: '#f7f7f9',
-          tint: '#fafbff',
+          DEFAULT: 'rgb(var(--color-bg) / <alpha-value>)',
+          muted: 'rgb(var(--color-bg-muted) / <alpha-value>)',
+          tint: 'rgb(var(--color-bg-tint) / <alpha-value>)',
         },
-        ring: '#ecedf3',
+        surface: 'rgb(var(--color-surface) / <alpha-value>)',
+        ring: 'rgb(var(--color-ring) / <alpha-value>)',
         accent: {
-          green: '#14F195',
-          purple: '#9945FF',
+          green: 'rgb(var(--color-accent-green) / <alpha-value>)',
+          purple: 'rgb(var(--color-accent-purple) / <alpha-value>)',
         },
-        // Above/below baseline colouring — used on GDI cells in the leaderboard.
         success: {
-          DEFAULT: '#22a36c',
-          tint: '#e8f7f0',
+          DEFAULT: 'rgb(var(--color-success) / <alpha-value>)',
         },
-        warn: '#c87a00',
         bad: {
-          DEFAULT: '#c2364a',
-          tint: '#fbe9ec',
+          DEFAULT: 'rgb(var(--color-bad) / <alpha-value>)',
         },
       },
       fontFamily: {
         sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
         display: ['var(--font-display)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       letterSpacing: {
         tight2: '-0.025em',
