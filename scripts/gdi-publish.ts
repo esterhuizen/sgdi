@@ -137,18 +137,41 @@ async function main() {
   const pools = storage.listTrackedPools();
   const poolMeta = new Map(pools.map((p) => [p.pool_address, p]));
 
+  // Filter unscored pools (zero validators or null GDI) — they're tracked
+  // for future epochs but don't belong on the leaderboard until they have
+  // delegated stake. Surfaced in /var/lib/sgdi/logs/ instead so an operator
+  // can see "tracking but no stake" pools without the leaderboard polluting.
+  const scoredPools = latestScores.filter(
+    (s) => s.gdi_composite != null && (s.validator_count ?? 0) > 0,
+  );
+  const trackedButUnscored = latestScores.filter(
+    (s) => !(s.gdi_composite != null && (s.validator_count ?? 0) > 0),
+  );
+
   const leaderboard = {
     epoch: latestEpoch,
     last_published_at: new Date().toISOString(),
     methodology_version: METHODOLOGY_VERSION,
     network_baseline: latestBaseline ? formatBaseline(latestBaseline) : null,
-    pools: latestScores.map((s) => {
+    pools: scoredPools.map((s) => {
       const meta = poolMeta.get(s.pool_address);
       return {
         ...formatPoolScore(s),
         pool_name: meta?.pool_name ?? null,
         pool_program: meta?.pool_program ?? null,
         pool_token_mint: meta?.pool_token_mint ?? null,
+      };
+    }),
+    tracked_but_unscored: trackedButUnscored.map((s) => {
+      const meta = poolMeta.get(s.pool_address);
+      return {
+        pool_address: s.pool_address,
+        pool_name: meta?.pool_name ?? null,
+        validator_count: s.validator_count ?? 0,
+        reason:
+          (s.validator_count ?? 0) === 0
+            ? 'no_validators_in_pool'
+            : 'score_unavailable',
       };
     }),
   };
