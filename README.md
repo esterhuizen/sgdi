@@ -10,15 +10,15 @@ The metric, the data, and the methodology are open. The numbers are independentl
 
 For each pool, every Solana epoch (≈ 2–3 days), SGDI computes:
 
-- **eN_country** — effective number of countries the pool's stake is spread across
-- **eN_city** — effective number of cities
-- **eN_ASN** — effective number of distinct network operators
+- **DC_country** — *Decentralisation Contribution* on country: stake-weighted average rarity of the countries the pool delegates to
+- **DC_city** — same on cities
+- **DC_ASN** — same on ASNs (network operators)
 - **GDI** — geometric mean of the three (the headline number)
 - **Network Impact Score** — stake-weighted Stakewiz `wiz_score`, captures whether the pool delegates to validators that strengthen the network as a whole
 
 5-epoch and 10-epoch rolling averages are shown alongside per-epoch numbers (per-epoch is noisy; rolling is the trustworthy signal).
 
-A **network baseline GDI** is also computed from the entire active validator set. Pools above the baseline are improving network decentralisation; pools below are concentrating.
+A **network baseline GDI** — the same formula applied to the entire active validator set — is computed each epoch. **A pool above the baseline is preferentially delegating to less-popular places than the network average — directly reducing concentration. Below baseline = reinforcing already-popular spots.**
 
 ## Why it exists
 
@@ -34,15 +34,21 @@ The methodology is named neutrally so it can credibly outlive any one publisher.
 
 ## Methodology in one screen
 
-For each dimension D ∈ {country, city, ASN}, with `pᵢ` = fraction of pool stake delegated to validators in category `i`:
+For each validator `v` in a pool with stake fraction `wᵥ` within the pool:
 
 ```
-eN_D  =  exp( − Σ pᵢ · ln(pᵢ) )         # stake-weighted "effective number"
-GDI   =  ( eN_country · eN_city · eN_ASN )^(1/3)   # geometric mean
-NIS   =  Σ wᵥ · stakewiz_wiz_score(v)    # network impact, secondary signal
+rarity_D(v)  =  -ln( network_share_D(category of v) )       D ∈ {country, city, ASN}
+
+DC_D         =  Σᵥ wᵥ · rarity_D(v)                          stake-weighted avg rarity
+
+GDI          =  ( DC_country · DC_city · DC_asn )^(1/3)      geometric mean
+
+NIS          =  Σᵥ wᵥ · stakewiz_wiz_score(v)                 network impact, secondary
 ```
 
-Geometric mean penalises being good on one dimension and poor on another — distinct risk classes shouldn't average linearly.
+`network_share_D(category)` is the fraction of total network stake currently delegated to validators in that category. A validator in NYC (popular) has a low rarity; a validator in Manila (underweight) has a high rarity. Pools with stake in rare places score higher.
+
+Geometric mean penalises being good on one dimension and poor on another — distinct decentralisation risk classes (a pool that's geographically diverse but everyone's on AWS still has a single-ASN failure mode).
 
 Full methodology, sources, limitations, and version history at [sgdi.app/methodology](https://sgdi.app/methodology).
 

@@ -4,23 +4,29 @@
 //
 // Coverage strategy: pin every formula to a worked example. If any number
 // here changes, that's a methodology bump (PATCH or higher per CONTRIBUTING.md).
+//
+// Methodology (sgdi-1.0.0):
+//   rarity_D(v) = -ln( network_share_D(category of v) )
+//   DC_D        = Σᵥ wᵥ · rarity_D(v)        stake-weighted avg
+//   GDI         = ( DC_country · DC_city · DC_asn )^(1/3)
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import {
-  shannonEntropyNats,
-  effectiveNumber,
-  bucketStake,
+  rarityFromShare,
+  computeShares,
+  computeNetworkShares,
+  decentralisationContribution,
   geometricMean3,
   networkImpactScore,
   computePoolScores,
+  computeNetworkBaseline,
   rollingMean,
-  UNKNOWN_BUCKET,
   type ValidatorMetadata,
   type PoolStakeRow,
+  type NetworkShares,
 } from '../src/lib/gdi/scoring.ts';
 
-// Tolerance for floating-point comparisons.
 const EPS = 1e-9;
 function near(actual: number, expected: number, eps = EPS) {
   assert.ok(
@@ -30,110 +36,141 @@ function near(actual: number, expected: number, eps = EPS) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Shannon entropy
+// rarityFromShare
 // ───────────────────────────────────────────────────────────────────────────
 
-test('shannonEntropyNats: empty input → 0', () => {
-  assert.equal(shannonEntropyNats(new Map()), 0);
+test('rarityFromShare: -ln(share) for normal positive shares', () => {
+  near(rarityFromShare(0.5), Math.log(2));
+  near(rarityFromShare(0.1), -Math.log(0.1));
+  near(rarityFromShare(0.01), -Math.log(0.01));
 });
 
-test('shannonEntropyNats: single bucket → 0 (perfectly concentrated)', () => {
-  const m = new Map([['US', 100n]]);
-  assert.equal(shannonEntropyNats(m), 0);
+test('rarityFromShare: zero/negative clamps to floor (~20.7)', () => {
+  // RARITY_SHARE_FLOOR = 1e-9, so -ln(1e-9) ≈ 20.72.
+  near(rarityFromShare(0), -Math.log(1e-9), 1e-9);
+  near(rarityFromShare(-0.5), -Math.log(1e-9), 1e-9);
 });
 
-test('shannonEntropyNats: two buckets evenly split → ln(2)', () => {
-  const m = new Map([['US', 50n], ['DE', 50n]]);
-  near(shannonEntropyNats(m), Math.log(2));
-});
-
-test('shannonEntropyNats: N buckets evenly split → ln(N)', () => {
-  for (const n of [3, 5, 10, 25]) {
-    const m = new Map<string, bigint>();
-    for (let i = 0; i < n; i++) m.set(`b${i}`, 10n);
-    near(shannonEntropyNats(m), Math.log(n), 1e-12);
-  }
-});
-
-test('shannonEntropyNats: skewed two-bucket (90/10)', () => {
-  // H = -(0.9 ln 0.9 + 0.1 ln 0.1)
-  const m = new Map([['A', 90n], ['B', 10n]]);
-  const expected = -(0.9 * Math.log(0.9) + 0.1 * Math.log(0.1));
-  near(shannonEntropyNats(m), expected, 1e-12);
-});
-
-test('shannonEntropyNats: zero-weight bucket is ignored', () => {
-  const m = new Map([['US', 50n], ['DE', 50n], ['empty', 0n]]);
-  near(shannonEntropyNats(m), Math.log(2));
+test('rarityFromShare: share=1 (everything in one bucket) → 0', () => {
+  near(rarityFromShare(1), 0);
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// effectiveNumber
+// computeShares
 // ───────────────────────────────────────────────────────────────────────────
 
-test('effectiveNumber: empty → 0 (sentinel for "no data")', () => {
-  assert.equal(effectiveNumber(new Map()), 0);
-});
-
-test('effectiveNumber: single bucket → 1 (exp(0))', () => {
-  const m = new Map([['US', 100n]]);
-  near(effectiveNumber(m), 1);
-});
-
-test('effectiveNumber: 5 buckets evenly split → 5', () => {
-  const m = new Map<string, bigint>([
-    ['US', 20n], ['DE', 20n], ['SG', 20n], ['JP', 20n], ['BR', 20n],
-  ]);
-  near(effectiveNumber(m), 5);
-});
-
-test('effectiveNumber: 10 buckets evenly split → 10', () => {
-  const m = new Map<string, bigint>();
-  for (let i = 0; i < 10; i++) m.set(`b${i}`, 1n);
-  near(effectiveNumber(m), 10, 1e-9);
-});
-
-test('effectiveNumber: heavily skewed → close to 1', () => {
-  const m = new Map([['A', 99n], ['B', 1n]]);
-  // H = -0.99 ln 0.99 - 0.01 ln 0.01 ≈ 0.0560
-  // eN = exp(H) ≈ 1.0577
-  near(effectiveNumber(m), Math.exp(-0.99 * Math.log(0.99) - 0.01 * Math.log(0.01)), 1e-9);
-});
-
-// ───────────────────────────────────────────────────────────────────────────
-// bucketStake
-// ───────────────────────────────────────────────────────────────────────────
-
-test('bucketStake: nulls fall into UNKNOWN_BUCKET', () => {
+test('computeShares: sums to 1.0 across placeable stake', () => {
   const rows: PoolStakeRow[] = [
-    { pubkey: 'a', stakeLamports: 10n },
-    { pubkey: 'b', stakeLamports: 20n },
-    { pubkey: 'c', stakeLamports: 30n },
+    { pubkey: 'a', stakeLamports: 100n },
+    { pubkey: 'b', stakeLamports: 200n },
+    { pubkey: 'c', stakeLamports: 300n },
+  ];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['a', { pubkey: 'a', country: 'US', city: null, asn: null, wizScore: null }],
+    ['b', { pubkey: 'b', country: 'DE', city: null, asn: null, wizScore: null }],
+    ['c', { pubkey: 'c', country: 'US', city: null, asn: null, wizScore: null }],
+  ]);
+  const shares = computeShares(rows, meta, (m) => m?.country ?? null);
+  near(shares.get('US')!, (100 + 300) / 600);
+  near(shares.get('DE')!, 200 / 600);
+  let sum = 0;
+  for (const v of shares.values()) sum += v;
+  near(sum, 1);
+});
+
+test('computeShares: validators with null bucket are excluded entirely', () => {
+  const rows: PoolStakeRow[] = [
+    { pubkey: 'a', stakeLamports: 100n },
+    { pubkey: 'b', stakeLamports: 100n },
+    { pubkey: 'c', stakeLamports: 100n },
   ];
   const meta = new Map<string, ValidatorMetadata>([
     ['a', { pubkey: 'a', country: 'US', city: null, asn: null, wizScore: null }],
     ['b', { pubkey: 'b', country: null, city: null, asn: null, wizScore: null }],
     // 'c' has no metadata at all
   ]);
-  const buckets = bucketStake(rows, meta, (m) => m?.country ?? null);
-  assert.equal(buckets.get('US'), 10n);
-  assert.equal(buckets.get(UNKNOWN_BUCKET), 50n);
+  const shares = computeShares(rows, meta, (m) => m?.country ?? null);
+  // Only 'a' is placeable → US gets 100% of placeable.
+  near(shares.get('US')!, 1);
+  assert.equal(shares.size, 1);
 });
 
-test('bucketStake: stake from same bucket sums', () => {
+test('computeShares: empty input → empty map', () => {
+  const shares = computeShares([], new Map(), (m) => m?.country ?? null);
+  assert.equal(shares.size, 0);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// decentralisationContribution
+// ───────────────────────────────────────────────────────────────────────────
+
+test('DC: 100% of stake in the most-rare bucket → rarity of that bucket', () => {
+  // Network: A=50%, B=30%, C=20%. Pool: 100% in C.
+  const shares = new Map([['A', 0.5], ['B', 0.3], ['C', 0.2]]);
+  const rows: PoolStakeRow[] = [{ pubkey: 'p', stakeLamports: 100n }];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['p', { pubkey: 'p', country: 'C', city: null, asn: null, wizScore: null }],
+  ]);
+  const dc = decentralisationContribution(rows, meta, shares, (m) => m?.country ?? null);
+  near(dc, -Math.log(0.2));
+});
+
+test('DC: 50/50 stake across A and C → average rarity of A and C', () => {
+  const shares = new Map([['A', 0.5], ['B', 0.3], ['C', 0.2]]);
   const rows: PoolStakeRow[] = [
-    { pubkey: 'a', stakeLamports: 100n },
-    { pubkey: 'b', stakeLamports: 200n },
-    { pubkey: 'c', stakeLamports: 50n },
+    { pubkey: 'p1', stakeLamports: 50n },
+    { pubkey: 'p2', stakeLamports: 50n },
   ];
   const meta = new Map<string, ValidatorMetadata>([
-    ['a', { pubkey: 'a', country: 'US', city: null, asn: null, wizScore: null }],
-    ['b', { pubkey: 'b', country: 'US', city: null, asn: null, wizScore: null }],
-    ['c', { pubkey: 'c', country: 'DE', city: null, asn: null, wizScore: null }],
+    ['p1', { pubkey: 'p1', country: 'A', city: null, asn: null, wizScore: null }],
+    ['p2', { pubkey: 'p2', country: 'C', city: null, asn: null, wizScore: null }],
   ]);
-  const buckets = bucketStake(rows, meta, (m) => m?.country ?? null);
-  assert.equal(buckets.get('US'), 300n);
-  assert.equal(buckets.get('DE'), 50n);
+  const dc = decentralisationContribution(rows, meta, shares, (m) => m?.country ?? null);
+  const expected = 0.5 * -Math.log(0.5) + 0.5 * -Math.log(0.2);
+  near(dc, expected);
+});
+
+test('DC: validators with null bucket are excluded from both numerator and denominator', () => {
+  // 100 stake at C (rare); 100 stake at unknown country → DC reflects only C's rarity.
+  const shares = new Map([['A', 0.5], ['B', 0.3], ['C', 0.2]]);
+  const rows: PoolStakeRow[] = [
+    { pubkey: 'p1', stakeLamports: 100n },
+    { pubkey: 'p2', stakeLamports: 100n },
+  ];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['p1', { pubkey: 'p1', country: 'C', city: null, asn: null, wizScore: null }],
+    ['p2', { pubkey: 'p2', country: null, city: null, asn: null, wizScore: null }],
+  ]);
+  const dc = decentralisationContribution(rows, meta, shares, (m) => m?.country ?? null);
+  near(dc, -Math.log(0.2));
+});
+
+test('DC: NaN if no validator has a placeable bucket', () => {
+  const shares = new Map([['A', 1.0]]);
+  const rows: PoolStakeRow[] = [{ pubkey: 'p', stakeLamports: 100n }];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['p', { pubkey: 'p', country: null, city: null, asn: null, wizScore: null }],
+  ]);
+  const dc = decentralisationContribution(rows, meta, shares, (m) => m?.country ?? null);
+  assert.ok(Number.isNaN(dc));
+});
+
+test('DC: a pool that mirrors network distribution → DC equals network avg rarity', () => {
+  // Network: A=50%, B=30%, C=20%. Pool stake split 50/30/20.
+  const shares = new Map([['A', 0.5], ['B', 0.3], ['C', 0.2]]);
+  const rows: PoolStakeRow[] = [
+    { pubkey: 'pa', stakeLamports: 50n },
+    { pubkey: 'pb', stakeLamports: 30n },
+    { pubkey: 'pc', stakeLamports: 20n },
+  ];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['pa', { pubkey: 'pa', country: 'A', city: null, asn: null, wizScore: null }],
+    ['pb', { pubkey: 'pb', country: 'B', city: null, asn: null, wizScore: null }],
+    ['pc', { pubkey: 'pc', country: 'C', city: null, asn: null, wizScore: null }],
+  ]);
+  const dc = decentralisationContribution(rows, meta, shares, (m) => m?.country ?? null);
+  const networkAvgRarity = 0.5 * -Math.log(0.5) + 0.3 * -Math.log(0.3) + 0.2 * -Math.log(0.2);
+  near(dc, networkAvgRarity, 1e-9);
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -144,30 +181,26 @@ test('geometricMean3: cube of equal → that value', () => {
   near(geometricMean3(8, 8, 8), 8);
 });
 
-test('geometricMean3: 1×8×27 → 6 (cube root of 216)', () => {
+test('geometricMean3: 1·8·27 → cbrt(216) = 6', () => {
   near(geometricMean3(1, 8, 27), 6);
 });
 
-test('geometricMean3: any zero → 0 (penalises one-dimension failure)', () => {
-  assert.equal(geometricMean3(0, 5, 5), 0);
-  assert.equal(geometricMean3(5, 0, 5), 0);
-  assert.equal(geometricMean3(5, 5, 0), 0);
+test('geometricMean3: NaN on any non-positive or NaN input', () => {
+  assert.ok(Number.isNaN(geometricMean3(0, 5, 5)));
+  assert.ok(Number.isNaN(geometricMean3(-1, 5, 5)));
+  assert.ok(Number.isNaN(geometricMean3(Number.NaN, 5, 5)));
 });
 
 test('geometricMean3: penalises imbalance vs arithmetic mean', () => {
-  // Arithmetic mean of (1, 1, 27) is ~9.67; geometric mean is 3.
-  // The geometric mean correctly penalises being good on one dim, terrible on others.
-  const am = (1 + 1 + 27) / 3;
-  const gm = geometricMean3(1, 1, 27);
-  assert.ok(gm < am, `expected gm (${gm}) < am (${am})`);
-  near(gm, 3, 1e-9);
+  // (1, 1, 27): arithmetic = 9.67, geometric = 3 — geometric correctly penalises.
+  near(geometricMean3(1, 1, 27), 3, 1e-9);
 });
 
 // ───────────────────────────────────────────────────────────────────────────
 // networkImpactScore
 // ───────────────────────────────────────────────────────────────────────────
 
-test('networkImpactScore: equal stake, equal scores → that score', () => {
+test('NIS: equal stake, equal scores → that score', () => {
   const rows: PoolStakeRow[] = [
     { pubkey: 'a', stakeLamports: 100n },
     { pubkey: 'b', stakeLamports: 100n },
@@ -179,8 +212,8 @@ test('networkImpactScore: equal stake, equal scores → that score', () => {
   near(networkImpactScore(rows, meta), 80);
 });
 
-test('networkImpactScore: stake-weighted', () => {
-  // 90% of stake at score 100, 10% at score 0 → weighted avg = 90.
+test('NIS: stake-weighted', () => {
+  // 90 at score 100, 10 at score 0 → 90.
   const rows: PoolStakeRow[] = [
     { pubkey: 'a', stakeLamports: 90n },
     { pubkey: 'b', stakeLamports: 10n },
@@ -192,10 +225,7 @@ test('networkImpactScore: stake-weighted', () => {
   near(networkImpactScore(rows, meta), 90);
 });
 
-test('networkImpactScore: validators with null wizScore are excluded from both numerator and denominator', () => {
-  // 100 stake at score 80, 100 stake with no score → result is 80 (only scored
-  // validator influences it). Caller can interpret "what fraction was scored?"
-  // separately if they care.
+test('NIS: validators with null wizScore excluded from both numerator and denominator', () => {
   const rows: PoolStakeRow[] = [
     { pubkey: 'a', stakeLamports: 100n },
     { pubkey: 'b', stakeLamports: 100n },
@@ -207,7 +237,7 @@ test('networkImpactScore: validators with null wizScore are excluded from both n
   near(networkImpactScore(rows, meta), 80);
 });
 
-test('networkImpactScore: NaN if no validator has a wizScore', () => {
+test('NIS: NaN if no scored validator', () => {
   const rows: PoolStakeRow[] = [{ pubkey: 'a', stakeLamports: 100n }];
   const meta = new Map<string, ValidatorMetadata>([
     ['a', { pubkey: 'a', country: null, city: null, asn: null, wizScore: null }],
@@ -216,87 +246,121 @@ test('networkImpactScore: NaN if no validator has a wizScore', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// computePoolScores — end-to-end pure function
+// computePoolScores — end-to-end
 // ───────────────────────────────────────────────────────────────────────────
 
-test('computePoolScores: 3 validators, perfectly diverse on all dims, equal stake', () => {
+function makeShares(country: [string, number][], city: [string, number][], asn: [string, number][]): NetworkShares {
+  return {
+    country: new Map(country),
+    city: new Map(city),
+    asn: new Map(asn),
+  };
+}
+
+test('computePoolScores: pool entirely in popular places → low DC, GDI < baseline', () => {
+  // Network: A is dominant on every dim (60-70% share).
+  const shares = makeShares(
+    [['US', 0.7], ['DE', 0.2], ['SG', 0.1]],
+    [['NY', 0.6], ['BER', 0.25], ['SGP', 0.15]],
+    [['1', 0.65], ['2', 0.25], ['3', 0.10]],
+  );
+  // Pool: all 3 validators in the dominant slot.
   const rows: PoolStakeRow[] = [
     { pubkey: 'a', stakeLamports: 100n },
     { pubkey: 'b', stakeLamports: 100n },
     { pubkey: 'c', stakeLamports: 100n },
   ];
-  const meta = new Map<string, ValidatorMetadata>([
-    ['a', { pubkey: 'a', country: 'US', city: 'NY',  asn: '111', wizScore: 90 }],
-    ['b', { pubkey: 'b', country: 'DE', city: 'BER', asn: '222', wizScore: 90 }],
-    ['c', { pubkey: 'c', country: 'SG', city: 'SGP', asn: '333', wizScore: 90 }],
-  ]);
-  const r = computePoolScores(rows, meta);
-  near(r.eN_country, 3, 1e-9);
-  near(r.eN_city, 3, 1e-9);
-  near(r.eN_asn, 3, 1e-9);
-  near(r.gdi, 3, 1e-9);  // cube root of 27
-  near(r.nis, 90);
-  assert.equal(r.validatorCount, 3);
-  assert.equal(r.totalStakeLamports, 300n);
-});
-
-test('computePoolScores: all in one country, diverse cities, single ASN', () => {
-  const rows: PoolStakeRow[] = [
-    { pubkey: 'a', stakeLamports: 100n },
-    { pubkey: 'b', stakeLamports: 100n },
-    { pubkey: 'c', stakeLamports: 100n },
-  ];
-  const meta = new Map<string, ValidatorMetadata>([
-    ['a', { pubkey: 'a', country: 'US', city: 'NY',  asn: '111', wizScore: 80 }],
-    ['b', { pubkey: 'b', country: 'US', city: 'SF',  asn: '111', wizScore: 80 }],
-    ['c', { pubkey: 'c', country: 'US', city: 'CHI', asn: '111', wizScore: 80 }],
-  ]);
-  const r = computePoolScores(rows, meta);
-  near(r.eN_country, 1);
-  near(r.eN_city, 3, 1e-9);
-  near(r.eN_asn, 1);
-  // GDI = cbrt(1 * 3 * 1) = cbrt(3) ≈ 1.4422
-  near(r.gdi, Math.cbrt(3), 1e-9);
-});
-
-test('computePoolScores: stake-weighted skew matters', () => {
-  // 90% of stake in US/NY/ASN1; 10% spread across two other countries/cities/ASNs.
-  // eN_* should be close to 1 (heavily concentrated), not 3 (the count).
-  const rows: PoolStakeRow[] = [
-    { pubkey: 'a', stakeLamports: 90n },
-    { pubkey: 'b', stakeLamports: 5n },
-    { pubkey: 'c', stakeLamports: 5n },
-  ];
-  const meta = new Map<string, ValidatorMetadata>([
-    ['a', { pubkey: 'a', country: 'US', city: 'NY',  asn: '1', wizScore: 80 }],
-    ['b', { pubkey: 'b', country: 'DE', city: 'BER', asn: '2', wizScore: 80 }],
-    ['c', { pubkey: 'c', country: 'SG', city: 'SGP', asn: '3', wizScore: 80 }],
-  ]);
-  const r = computePoolScores(rows, meta);
-  // H = -(0.9 ln 0.9 + 0.05 ln 0.05 + 0.05 ln 0.05) ≈ 0.394
-  // eN = exp(H) ≈ 1.483
-  const H = -(0.9 * Math.log(0.9) + 0.05 * Math.log(0.05) + 0.05 * Math.log(0.05));
-  near(r.eN_country, Math.exp(H), 1e-9);
-  near(r.eN_city, Math.exp(H), 1e-9);
-  near(r.eN_asn, Math.exp(H), 1e-9);
-});
-
-test('computePoolScores: missing metadata for a validator → falls into Unknown bucket', () => {
-  const rows: PoolStakeRow[] = [
-    { pubkey: 'a', stakeLamports: 50n },
-    { pubkey: 'b', stakeLamports: 50n },
-  ];
-  // Only 'a' has metadata.
   const meta = new Map<string, ValidatorMetadata>([
     ['a', { pubkey: 'a', country: 'US', city: 'NY', asn: '1', wizScore: 90 }],
+    ['b', { pubkey: 'b', country: 'US', city: 'NY', asn: '1', wizScore: 90 }],
+    ['c', { pubkey: 'c', country: 'US', city: 'NY', asn: '1', wizScore: 90 }],
   ]);
-  const r = computePoolScores(rows, meta);
-  // 'b' bucketed as Unknown across all dims → 50/50 split.
-  near(r.eN_country, 2);
-  near(r.eN_city, 2);
-  near(r.eN_asn, 2);
-  // NIS: only 'a' is scored (50 stake), so weighted avg over scored = 90.
-  near(r.nis, 90);
+  const r = computePoolScores(rows, meta, shares);
+  near(r.dc_country, -Math.log(0.7));
+  near(r.dc_city, -Math.log(0.6));
+  near(r.dc_asn, -Math.log(0.65));
+  // GDI = cbrt(rarity products); these are all small (popular spots → low rarity)
+  assert.ok(r.gdi < 1, `expected GDI < 1 for fully-in-popular-spot pool; got ${r.gdi}`);
+});
+
+test('computePoolScores: pool entirely in rare places → high DC, GDI > baseline', () => {
+  const shares = makeShares(
+    [['US', 0.7], ['DE', 0.2], ['SG', 0.1]],
+    [['NY', 0.6], ['BER', 0.25], ['SGP', 0.15]],
+    [['1', 0.65], ['2', 0.25], ['3', 0.10]],
+  );
+  const rows: PoolStakeRow[] = [
+    { pubkey: 'a', stakeLamports: 100n },
+    { pubkey: 'b', stakeLamports: 100n },
+  ];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['a', { pubkey: 'a', country: 'SG', city: 'SGP', asn: '3', wizScore: 90 }],
+    ['b', { pubkey: 'b', country: 'SG', city: 'SGP', asn: '3', wizScore: 90 }],
+  ]);
+  const r = computePoolScores(rows, meta, shares);
+  near(r.dc_country, -Math.log(0.1));
+  near(r.dc_city, -Math.log(0.15));
+  near(r.dc_asn, -Math.log(0.10));
+});
+
+test('computePoolScores: placementCoverage reflects unknown-metadata stake', () => {
+  const shares = makeShares([['US', 1]], [['NY', 1]], [['1', 1]]);
+  const rows: PoolStakeRow[] = [
+    { pubkey: 'a', stakeLamports: 100n },
+    { pubkey: 'b', stakeLamports: 100n },
+  ];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['a', { pubkey: 'a', country: 'US', city: 'NY', asn: '1', wizScore: null }],
+    // 'b' has no metadata → 50% of stake unplaceable
+  ]);
+  const r = computePoolScores(rows, meta, shares);
+  near(r.placementCoverage, 0.5);
+});
+
+test('computePoolScores: pool perfectly mirroring network → DC equals network baseline DC', () => {
+  // Build a synthetic network: 3 validators in (US, DE, SG) with shares (0.5, 0.3, 0.2).
+  // Then feed the same data as both the "pool" and the "network" — DC should equal baseline.
+  const shares = makeShares(
+    [['US', 0.5], ['DE', 0.3], ['SG', 0.2]],
+    [['NY', 0.5], ['BER', 0.3], ['SGP', 0.2]],
+    [['1', 0.5], ['2', 0.3], ['3', 0.2]],
+  );
+  const rows: PoolStakeRow[] = [
+    { pubkey: 'us', stakeLamports: 50n },
+    { pubkey: 'de', stakeLamports: 30n },
+    { pubkey: 'sg', stakeLamports: 20n },
+  ];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['us', { pubkey: 'us', country: 'US', city: 'NY', asn: '1', wizScore: 80 }],
+    ['de', { pubkey: 'de', country: 'DE', city: 'BER', asn: '2', wizScore: 80 }],
+    ['sg', { pubkey: 'sg', country: 'SG', city: 'SGP', asn: '3', wizScore: 80 }],
+  ]);
+  const pool = computePoolScores(rows, meta, shares);
+  const baseline = computeNetworkBaseline(rows, meta, shares);
+  near(pool.dc_country, baseline.dc_country);
+  near(pool.dc_city, baseline.dc_city);
+  near(pool.dc_asn, baseline.dc_asn);
+  near(pool.gdi, baseline.gdi);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// computeNetworkShares — convenience wrapper
+// ───────────────────────────────────────────────────────────────────────────
+
+test('computeNetworkShares: produces all three dimension maps', () => {
+  const rows: PoolStakeRow[] = [
+    { pubkey: 'a', stakeLamports: 60n },
+    { pubkey: 'b', stakeLamports: 40n },
+  ];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['a', { pubkey: 'a', country: 'US', city: 'NY', asn: '1', wizScore: null }],
+    ['b', { pubkey: 'b', country: 'DE', city: 'BER', asn: '2', wizScore: null }],
+  ]);
+  const ns = computeNetworkShares(rows, meta);
+  near(ns.country.get('US')!, 0.6);
+  near(ns.country.get('DE')!, 0.4);
+  near(ns.city.get('NY')!, 0.6);
+  near(ns.asn.get('1')!, 0.6);
 });
 
 // ───────────────────────────────────────────────────────────────────────────

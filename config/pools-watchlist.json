@@ -1,5 +1,12 @@
 {
-  "_comment": "Manual additions to the auto-detected top-25 list. PR-able. Each entry is a pool address; the program is auto-detected. The auto-list itself is sourced from SolanaCompass top-25 by TVL on initial backfill, then refreshed each ingest.",
-  "_format": "{ pool_address: string, note?: string, requested_by?: string, requested_at?: ISO8601 }",
-  "additions": []
+  "_comment": "Pool addresses to track. v1 bootstrap list is short — auto-discovery from SolanaCompass top-25 is a follow-up script. Each entry is a pool address; the program is auto-detected (must be in POOL_PROGRAM_FAMILIES in src/lib/gdi/data-sources/rpc.ts). PR-able.",
+  "_format": "{ pool_address: string, note?: string, added_at?: ISO8601 }",
+  "additions": [
+    {
+      "pool_address": "Bvbu55B991evqqhLtKcyTZjzQ4EQzRUwtf9T4CcpMmPL",
+      "note": "Definity — Sanctum-Multi SPL stake-pool",
+      "added_at": "2026-05-10"
+    }
+  ]
 }
+

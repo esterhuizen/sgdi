@@ -1,19 +1,33 @@
 // PURE SCORING MODULE — zero I/O.
 //
 // This is the soul of SGDI. It must remain side-effect-free, deterministic,
-// and unit-testable without mocks. Every input is a value, every output is a
-// value. If you ever feel like adding a `fetch` or `readFile` here, the
-// design has failed — refactor instead.
+// and unit-testable without mocks. Stays pure or the design has failed.
 //
-// Spec §3:
-//   eN_D  = exp( -Σ pᵢ · ln(pᵢ) )       per dimension D ∈ {country, city, ASN}
-//   GDI   = ( eN_country · eN_city · eN_ASN )^(1/3)   geometric mean
-//   NIS   = Σ wᵥ · stakewiz_wiz_score(v)              network impact
+// Methodology (sgdi-1.0.0):
+//
+//   For each validator v in a pool with stake fraction wᵥ:
+//     rarity_D(v) = -ln( network_share_D(category of v) )    D ∈ {country, city, ASN}
+//
+//   Pool's Decentralisation Contribution per dimension:
+//     DC_D = Σᵥ wᵥ · rarity_D(v)            stake-weighted average rarity
+//
+//   Composite GDI:
+//     GDI = ( DC_country · DC_city · DC_asn )^(1/3)    geometric mean
+//
+//   Network baseline = the same DC formula applied to the entire active
+//   validator set with stake-weighted averaging. A pool above its
+//   environment's baseline is preferentially delegating to less-popular
+//   geographic / network positions — directly contributing to network
+//   decentralisation.
 
 export const METHODOLOGY_VERSION = 'sgdi-1.0.0';
 
-/** Bucket key for an unknown / missing-metadata value. */
-export const UNKNOWN_BUCKET = 'Unknown';
+/**
+ * Lower-bound on a category's network share when computing rarity. Prevents
+ * -ln(0) when a validator's category isn't represented in network shares
+ * (shouldn't happen, but defensive). At max-rarity = -ln(1e-9) ≈ 20.7.
+ */
+const RARITY_SHARE_FLOOR = 1e-9;
 
 // ───────────────────────────────────────────────────────────────────────────
 // Inputs
@@ -25,112 +39,172 @@ export type ValidatorMetadata = {
   country: string | null;
   city: string | null;
   asn: string | null;
-  /** Stakewiz wiz_score, 0-100. Null if Stakewiz didn't return a score for this validator. */
+  /** Stakewiz wiz_score, 0-100. Null if Stakewiz didn't return a score. */
   wizScore: number | null;
 };
 
 /**
  * Per-validator stake within a single pool, in lamports.
- * Validators with zero stake should not be included; they shouldn't influence the score.
+ * Validators with zero stake should not be included.
  */
 export type PoolStakeRow = {
   pubkey: string;
   stakeLamports: bigint;
 };
 
+/**
+ * Per-dimension network shares: bucket name → fraction of network stake (0-1).
+ * Computed from the entire active validator set (typically via Stakewiz's
+ * activated_stake field). Used as the rarity reference.
+ */
+export type NetworkShares = {
+  country: ReadonlyMap<string, number>;
+  city: ReadonlyMap<string, number>;
+  asn: ReadonlyMap<string, number>;
+};
+
 export type DimensionScores = {
-  eN_country: number;
-  eN_city: number;
-  eN_asn: number;
+  dc_country: number;
+  dc_city: number;
+  dc_asn: number;
 };
 
 export type PoolScoreResult = DimensionScores & {
   gdi: number;
   /**
-   * Stake-weighted Stakewiz wiz_score, scaled 0-100 (since wiz_score is 0-100).
-   * NaN if no validator in the pool has a wiz_score (no score available).
+   * Stake-weighted Stakewiz wiz_score among scored validators.
+   * NaN if no validator in the pool has a wiz_score.
    */
   nis: number;
+  validatorCount: number;
+  totalStakeLamports: bigint;
+  /**
+   * Fraction of pool stake (0-1) that we could place geographically across
+   * all three dimensions. < 1 means some validators had missing metadata
+   * (their stake was excluded from the DC computation). Display alongside
+   * the score so operators see data quality.
+   */
+  placementCoverage: number;
+};
+
+export type NetworkBaselineResult = DimensionScores & {
+  gdi: number;
   validatorCount: number;
   totalStakeLamports: bigint;
 };
 
 // ───────────────────────────────────────────────────────────────────────────
-// Pure helpers
+// Network shares
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * Bucket-sum: returns Map(bucket → sum-of-stake).
- * `getBucket` chooses the bucket per row. Null/empty bucket values fall to
- * UNKNOWN_BUCKET so they're still counted (excluding them would inflate eN
- * by silently dropping stake from the denominator).
+ * Compute per-bucket stake share over a full set of (validator, stake)
+ * pairs and a bucket-getter. Validators with null bucket values are
+ * EXCLUDED from both numerator and denominator — the result represents
+ * "share of placeable stake," which is the right base for rarity comparisons.
  */
-export function bucketStake<T extends PoolStakeRow>(
-  rows: readonly T[],
+export function computeShares(
+  rows: readonly PoolStakeRow[],
   meta: ReadonlyMap<string, ValidatorMetadata>,
   getBucket: (m: ValidatorMetadata | undefined) => string | null,
-): Map<string, bigint> {
+): Map<string, number> {
   const totals = new Map<string, bigint>();
+  let placeableTotal = 0n;
   for (const r of rows) {
-    const m = meta.get(r.pubkey);
-    const raw = getBucket(m);
-    const bucket = raw && raw.trim() !== '' ? raw : UNKNOWN_BUCKET;
+    const bucket = getBucket(meta.get(r.pubkey));
+    if (bucket == null || bucket.trim() === '') continue;
     totals.set(bucket, (totals.get(bucket) || 0n) + r.stakeLamports);
+    placeableTotal += r.stakeLamports;
   }
-  return totals;
+  const shares = new Map<string, number>();
+  if (placeableTotal === 0n) return shares;
+  const total = Number(placeableTotal);
+  for (const [k, v] of totals) shares.set(k, Number(v) / total);
+  return shares;
+}
+
+/** Convenience: build all three dimension shares at once. */
+export function computeNetworkShares(
+  rows: readonly PoolStakeRow[],
+  meta: ReadonlyMap<string, ValidatorMetadata>,
+): NetworkShares {
+  return {
+    country: computeShares(rows, meta, (m) => m?.country ?? null),
+    city:    computeShares(rows, meta, (m) => m?.city    ?? null),
+    asn:     computeShares(rows, meta, (m) => m?.asn     ?? null),
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Rarity + Decentralisation Contribution
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Rarity of a category given its network share, in nats.
+ * - share = 0.5 (popular) → rarity ≈ 0.693
+ * - share = 0.01 (rare)   → rarity ≈ 4.6
+ * - share = 0             → clamped to RARITY_SHARE_FLOOR ≈ 20.7
+ */
+export function rarityFromShare(share: number): number {
+  const s = share > 0 ? share : RARITY_SHARE_FLOOR;
+  return -Math.log(s);
 }
 
 /**
- * Stake-weighted Shannon entropy, in nats (natural log).
- * Returns 0 for empty input or single-bucket input. Convention: 0·ln(0) = 0.
+ * Pool's Decentralisation Contribution on a single dimension:
+ *   DC = Σᵥ (wᵥ · rarity(v))   over validators with placeable bucket
+ *
+ * Weights are normalised over PLACEABLE stake (validators with non-null
+ * bucket values), not total pool stake — so a pool with 50% unknown-city
+ * stake gets a DC computed from the 50% we can place, not artificially
+ * deflated by the unknowns. The caller separately reports placementCoverage
+ * so operators see the data-quality proviso.
+ *
+ * Returns NaN if no validator has a placeable bucket value (signal: no data).
  */
-export function shannonEntropyNats(weights: ReadonlyMap<string, bigint>): number {
-  let total = 0n;
-  for (const w of weights.values()) total += w;
-  if (total === 0n) return 0;
-
-  const totalNum = Number(total);
-  let h = 0;
-  for (const w of weights.values()) {
-    if (w === 0n) continue;
-    const p = Number(w) / totalNum;
-    h -= p * Math.log(p);
+export function decentralisationContribution(
+  rows: readonly PoolStakeRow[],
+  meta: ReadonlyMap<string, ValidatorMetadata>,
+  shares: ReadonlyMap<string, number>,
+  getBucket: (m: ValidatorMetadata | undefined) => string | null,
+): number {
+  let placeableTotal = 0n;
+  let weighted = 0;
+  for (const r of rows) {
+    const bucket = getBucket(meta.get(r.pubkey));
+    if (bucket == null || bucket.trim() === '') continue;
+    placeableTotal += r.stakeLamports;
   }
-  return h;
+  if (placeableTotal === 0n) return Number.NaN;
+  const totalNum = Number(placeableTotal);
+  for (const r of rows) {
+    const bucket = getBucket(meta.get(r.pubkey));
+    if (bucket == null || bucket.trim() === '') continue;
+    const w = Number(r.stakeLamports) / totalNum;
+    weighted += w * rarityFromShare(shares.get(bucket) || 0);
+  }
+  return weighted;
 }
 
 /**
- * Effective number of categories: exp(H).
- * eN = 1 means perfectly concentrated; eN = N means perfectly even across N buckets.
- */
-export function effectiveNumber(weights: ReadonlyMap<string, bigint>): number {
-  // Empty-or-zero special case: convention "no data → eN = 0" (callers must
-  // decide whether to drop or to include in geometric mean).
-  let total = 0n;
-  for (const w of weights.values()) total += w;
-  if (total === 0n) return 0;
-
-  return Math.exp(shannonEntropyNats(weights));
-}
-
-/**
- * Geometric mean of three positive values.
- * If any value is 0 or negative, returns 0 (a pool with no diversity on any
- * one dimension is meaningfully bad on the composite).
+ * Geometric mean of three positive values. Any non-positive (NaN, ≤ 0) → NaN
+ * (signal: this dimension had no data or pathological input).
  */
 export function geometricMean3(a: number, b: number, c: number): number {
-  if (a <= 0 || b <= 0 || c <= 0) return 0;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c)) return Number.NaN;
+  if (a <= 0 || b <= 0 || c <= 0) return Number.NaN;
   return Math.cbrt(a * b * c);
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Network Impact Score (unchanged from earlier draft)
+// ───────────────────────────────────────────────────────────────────────────
+
 /**
- * Stake-weighted Stakewiz wiz_score for a pool.
- *
- * Returns NaN if no validator in the pool has a non-null wizScore (signal:
- * "we don't have enough data to compute NIS for this pool"). Validators with
- * a missing wizScore are excluded from the average — but their stake is also
- * excluded from the denominator, so the result is the weighted average among
- * scored validators only. The caller should display NaN as "—" rather than 0.
+ * Stake-weighted Stakewiz wiz_score for a pool. Validators without a
+ * wizScore are excluded from numerator AND denominator (returns the
+ * weighted average among scored validators). Result is 0-100 (since
+ * wiz_score is 0-100). NaN if no validator in the pool has a wizScore.
  */
 export function networkImpactScore(
   rows: readonly PoolStakeRow[],
@@ -149,64 +223,81 @@ export function networkImpactScore(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Composite
+// Composite (the public scoring entry points)
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * Compute all scores for one pool from its snapshots + enriched validator
- * metadata. Pure: same inputs → same outputs, no I/O, no clock.
+ * Compute all scores for one pool. Pure: same inputs → same outputs.
+ *
+ * `shares` is the network-wide stake-share map per dimension — typically
+ * computed once per ingest from the full Stakewiz validator set, then
+ * reused for every pool's score.
  */
 export function computePoolScores(
   rows: readonly PoolStakeRow[],
   meta: ReadonlyMap<string, ValidatorMetadata>,
+  shares: NetworkShares,
 ): PoolScoreResult {
   let total = 0n;
-  for (const r of rows) total += r.stakeLamports;
+  let placeable = 0n;
+  for (const r of rows) {
+    total += r.stakeLamports;
+    const m = meta.get(r.pubkey);
+    if (
+      m?.country != null && m.country.trim() !== '' &&
+      m.city    != null && m.city.trim()    !== '' &&
+      m.asn     != null && m.asn.trim()     !== ''
+    ) {
+      placeable += r.stakeLamports;
+    }
+  }
 
-  const eN_country = effectiveNumber(bucketStake(rows, meta, (m) => m?.country ?? null));
-  const eN_city    = effectiveNumber(bucketStake(rows, meta, (m) => m?.city    ?? null));
-  const eN_asn     = effectiveNumber(bucketStake(rows, meta, (m) => m?.asn     ?? null));
+  const dc_country = decentralisationContribution(rows, meta, shares.country, (m) => m?.country ?? null);
+  const dc_city    = decentralisationContribution(rows, meta, shares.city,    (m) => m?.city    ?? null);
+  const dc_asn     = decentralisationContribution(rows, meta, shares.asn,     (m) => m?.asn     ?? null);
 
   return {
-    eN_country,
-    eN_city,
-    eN_asn,
-    gdi: geometricMean3(eN_country, eN_city, eN_asn),
+    dc_country,
+    dc_city,
+    dc_asn,
+    gdi: geometricMean3(dc_country, dc_city, dc_asn),
     nis: networkImpactScore(rows, meta),
     validatorCount: rows.length,
     totalStakeLamports: total,
+    placementCoverage: total === 0n ? 0 : Number(placeable) / Number(total),
   };
 }
 
 /**
  * Network-baseline GDI: same formula applied to the entire active validator
- * set, stake-weighted. Each row is one validator with its TOTAL active stake
- * (not pool-scoped).
+ * set, stake-weighted. The baseline is by construction the network's own
+ * stake-weighted average rarity per dimension — pools with DC > baseline are
+ * delegating to less-popular-than-average places.
  */
 export function computeNetworkBaseline(
   rows: readonly PoolStakeRow[],
   meta: ReadonlyMap<string, ValidatorMetadata>,
-): DimensionScores & { gdi: number; validatorCount: number; totalStakeLamports: bigint } {
+  shares: NetworkShares,
+): NetworkBaselineResult {
   let total = 0n;
   for (const r of rows) total += r.stakeLamports;
 
-  const eN_country = effectiveNumber(bucketStake(rows, meta, (m) => m?.country ?? null));
-  const eN_city    = effectiveNumber(bucketStake(rows, meta, (m) => m?.city    ?? null));
-  const eN_asn     = effectiveNumber(bucketStake(rows, meta, (m) => m?.asn     ?? null));
+  const dc_country = decentralisationContribution(rows, meta, shares.country, (m) => m?.country ?? null);
+  const dc_city    = decentralisationContribution(rows, meta, shares.city,    (m) => m?.city    ?? null);
+  const dc_asn     = decentralisationContribution(rows, meta, shares.asn,     (m) => m?.asn     ?? null);
 
   return {
-    eN_country,
-    eN_city,
-    eN_asn,
-    gdi: geometricMean3(eN_country, eN_city, eN_asn),
+    dc_country,
+    dc_city,
+    dc_asn,
+    gdi: geometricMean3(dc_country, dc_city, dc_asn),
     validatorCount: rows.length,
     totalStakeLamports: total,
   };
 }
 
 /**
- * Rolling mean over the last N values of a per-epoch series.
- * Returns NaN if the input has fewer than 1 value.
+ * Rolling mean over the last N values. NaN if input is empty.
  */
 export function rollingMean(values: readonly number[], window: number): number {
   if (values.length === 0) return Number.NaN;

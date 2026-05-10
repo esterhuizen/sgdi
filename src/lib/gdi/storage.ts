@@ -69,11 +69,12 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_validator   ON pool_snapshots(validator
 CREATE TABLE IF NOT EXISTS pool_scores (
   epoch                INTEGER NOT NULL,
   pool_address         TEXT    NOT NULL,
-  eN_country           REAL,
-  eN_city              REAL,
-  eN_asn               REAL,
+  dc_country           REAL,
+  dc_city              REAL,
+  dc_asn               REAL,
   gdi_composite        REAL,
   network_impact_score REAL,
+  placement_coverage   REAL,
   validator_count      INTEGER,
   total_stake_lamports INTEGER,
   computed_at          INTEGER NOT NULL,
@@ -84,9 +85,9 @@ CREATE INDEX IF NOT EXISTS idx_scores_pool_epoch ON pool_scores(pool_address, ep
 
 CREATE TABLE IF NOT EXISTS network_baseline (
   epoch                INTEGER PRIMARY KEY,
-  eN_country           REAL,
-  eN_city              REAL,
-  eN_asn               REAL,
+  dc_country           REAL,
+  dc_city              REAL,
+  dc_asn               REAL,
   gdi_composite        REAL,
   validator_count      INTEGER,
   total_stake_lamports INTEGER,
@@ -149,11 +150,12 @@ export type PoolSnapshot = {
 export type PoolScore = {
   epoch: number;
   pool_address: string;
-  eN_country: number | null;
-  eN_city: number | null;
-  eN_asn: number | null;
+  dc_country: number | null;
+  dc_city: number | null;
+  dc_asn: number | null;
   gdi_composite: number | null;
   network_impact_score: number | null;
+  placement_coverage: number | null;
   validator_count: number | null;
   total_stake_lamports: bigint | null;
   computed_at: number;
@@ -162,9 +164,9 @@ export type PoolScore = {
 
 export type NetworkBaseline = {
   epoch: number;
-  eN_country: number | null;
-  eN_city: number | null;
-  eN_asn: number | null;
+  dc_country: number | null;
+  dc_city: number | null;
+  dc_asn: number | null;
   gdi_composite: number | null;
   validator_count: number | null;
   total_stake_lamports: bigint | null;
@@ -270,17 +272,18 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH) {
 
     upsertPoolScore: db.prepare(`
       INSERT INTO pool_scores
-        (epoch, pool_address, eN_country, eN_city, eN_asn, gdi_composite, network_impact_score,
-         validator_count, total_stake_lamports, computed_at, methodology_version)
+        (epoch, pool_address, dc_country, dc_city, dc_asn, gdi_composite, network_impact_score,
+         placement_coverage, validator_count, total_stake_lamports, computed_at, methodology_version)
       VALUES
-        (@epoch, @pool_address, @eN_country, @eN_city, @eN_asn, @gdi_composite, @network_impact_score,
-         @validator_count, @total_stake_lamports, @computed_at, @methodology_version)
+        (@epoch, @pool_address, @dc_country, @dc_city, @dc_asn, @gdi_composite, @network_impact_score,
+         @placement_coverage, @validator_count, @total_stake_lamports, @computed_at, @methodology_version)
       ON CONFLICT(epoch, pool_address) DO UPDATE SET
-        eN_country           = excluded.eN_country,
-        eN_city              = excluded.eN_city,
-        eN_asn               = excluded.eN_asn,
+        dc_country           = excluded.dc_country,
+        dc_city              = excluded.dc_city,
+        dc_asn               = excluded.dc_asn,
         gdi_composite        = excluded.gdi_composite,
         network_impact_score = excluded.network_impact_score,
+        placement_coverage   = excluded.placement_coverage,
         validator_count      = excluded.validator_count,
         total_stake_lamports = excluded.total_stake_lamports,
         computed_at          = excluded.computed_at,
@@ -298,15 +301,15 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH) {
 
     upsertNetworkBaseline: db.prepare(`
       INSERT INTO network_baseline
-        (epoch, eN_country, eN_city, eN_asn, gdi_composite, validator_count, total_stake_lamports,
+        (epoch, dc_country, dc_city, dc_asn, gdi_composite, validator_count, total_stake_lamports,
          computed_at, methodology_version)
       VALUES
-        (@epoch, @eN_country, @eN_city, @eN_asn, @gdi_composite, @validator_count, @total_stake_lamports,
+        (@epoch, @dc_country, @dc_city, @dc_asn, @gdi_composite, @validator_count, @total_stake_lamports,
          @computed_at, @methodology_version)
       ON CONFLICT(epoch) DO UPDATE SET
-        eN_country           = excluded.eN_country,
-        eN_city              = excluded.eN_city,
-        eN_asn               = excluded.eN_asn,
+        dc_country           = excluded.dc_country,
+        dc_city              = excluded.dc_city,
+        dc_asn               = excluded.dc_asn,
         gdi_composite        = excluded.gdi_composite,
         validator_count      = excluded.validator_count,
         total_stake_lamports = excluded.total_stake_lamports,

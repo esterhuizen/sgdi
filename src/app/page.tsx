@@ -28,15 +28,17 @@ export default function HomePage() {
           The metric
         </h2>
         <pre className="mt-3 overflow-x-auto rounded-lg bg-bg-muted p-4 text-sm leading-relaxed text-ink">
-{`eN_D  =  exp( -Σ pᵢ · ln(pᵢ) )       per dimension D ∈ {country, city, ASN}
-GDI   =  ( eN_country · eN_city · eN_ASN )^(1/3)
-NIS   =  Σ wᵥ · stakewiz_wiz_score(v)`}
+{`rarity_D(v)  =  -ln( network_share_D(category of v) )    D ∈ {country, city, ASN}
+DC_D         =  Σᵥ wᵥ · rarity_D(v)                       stake-weighted avg rarity
+GDI          =  ( DC_country · DC_city · DC_asn )^(1/3)
+NIS          =  Σᵥ wᵥ · stakewiz_wiz_score(v)             network impact, secondary`}
         </pre>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-muted">
-          eN is the effective number of categories the pool&apos;s stake is spread
-          across. Geometric mean of the three penalises being good on one
-          dimension and poor on another. NIS captures whether a pool delegates
-          to validators that improve the network as a whole.
+          A validator in a popular city (lots of network stake there) has low
+          rarity; a validator in an underweight city has high rarity. Pools
+          that delegate to rarer places score higher. Pools above the network
+          baseline GDI are reducing network concentration; below the baseline
+          are reinforcing it.
         </p>
       </section>
 
