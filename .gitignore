@@ -9,6 +9,7 @@
 # next.js telemetry / typegen
 /next-env.d.ts
 /.tsbuildinfo
+*.tsbuildinfo
 
 # env files — NEVER commit (this repo is public)
 .env
