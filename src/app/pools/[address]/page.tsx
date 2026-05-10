@@ -1,0 +1,195 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
+import { loadPoolLatest, loadPoolHistory, loadNetworkBaseline } from '@/lib/data';
+import { TrendChart } from '@/components/TrendChart';
+
+export const revalidate = 60;
+
+type Props = { params: Promise<{ address: string }> };
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { address } = await params;
+  const data = await loadPoolLatest(address);
+  const name = data?.pool.name || address.slice(0, 6) + '…' + address.slice(-4);
+  return {
+    title: `${name}`,
+    description: `Geographic decentralisation score and per-validator breakdown for ${name}.`,
+  };
+}
+
+const fmt = {
+  num: (v: number | null, d = 2) => (v == null ? '—' : v.toFixed(d)),
+  sol: (v: number | null) => {
+    if (v == null) return '—';
+    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+    return v.toFixed(0);
+  },
+  pct: (v: number | null) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`),
+  addr: (a: string) => `${a.slice(0, 8)}…${a.slice(-6)}`,
+};
+
+export default async function PoolDetailPage({ params }: Props) {
+  const { address } = await params;
+  const [latest, history, baselineFile] = await Promise.all([
+    loadPoolLatest(address),
+    loadPoolHistory(address),
+    loadNetworkBaseline(),
+  ]);
+
+  if (!latest) notFound();
+
+  const baseline = latest.network_baseline;
+  const cmp =
+    latest.score.gdi != null && baseline?.gdi != null && baseline.gdi !== 0
+      ? ((latest.score.gdi - baseline.gdi) / baseline.gdi) * 100
+      : null;
+
+  // Build trend chart series
+  const poolSeries = (history?.history || []).map((s) => ({ epoch: s.epoch, value: s.gdi }));
+  const epochSet = new Set(poolSeries.map((p) => p.epoch));
+  const baselineSeries =
+    (baselineFile?.history || [])
+      .filter((b) => epochSet.has(b.epoch))
+      .map((b) => ({ epoch: b.epoch, value: b.gdi }));
+
+  // Per-validator breakdown sorted by stake desc
+  const validatorsSorted = [...latest.validators].sort((a, b) => b.stake_sol - a.stake_sol);
+
+  return (
+    <main className="container-narrow py-14 md:py-20">
+      <Link href="/" className="text-sm text-ink-muted underline-offset-2 hover:underline">
+        ← Back to leaderboard
+      </Link>
+
+      <header className="mt-6 max-w-3xl">
+        <span className="pill">Pool · epoch {latest.score.epoch}</span>
+        <h1 className="mt-4 text-3xl font-semibold tracking-tight text-ink md:text-4xl">
+          {latest.pool.name || fmt.addr(latest.pool.address)}
+        </h1>
+        <div className="mt-2 font-mono text-xs text-ink-dim">{latest.pool.address}</div>
+        {latest.pool.program && (
+          <div className="mt-1 text-xs text-ink-dim">
+            Program: <span className="font-mono">{fmt.addr(latest.pool.program)}</span>
+          </div>
+        )}
+      </header>
+
+      {/* Score summary */}
+      <section className="mt-10 grid gap-4 md:grid-cols-4">
+        <div className="surface p-5">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">GDI</div>
+          <div className="num mt-2 text-3xl font-semibold text-ink">{fmt.num(latest.score.gdi, 3)}</div>
+          {cmp != null && (
+            <div
+              className={
+                'mt-1 text-xs ' +
+                (cmp > 0 ? 'text-success' : cmp < 0 ? 'text-bad' : 'text-ink-dim')
+              }
+            >
+              {cmp > 0 ? '▲' : cmp < 0 ? '▼' : '–'} {cmp > 0 ? '+' : ''}
+              {cmp.toFixed(1)}% vs baseline {fmt.num(baseline?.gdi ?? null, 3)}
+            </div>
+          )}
+        </div>
+        <div className="surface p-5">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">DC country</div>
+          <div className="num mt-2 text-2xl text-ink">{fmt.num(latest.score.dc_country, 2)}</div>
+          <div className="text-xs text-ink-dim">baseline {fmt.num(baseline?.dc_country ?? null, 2)}</div>
+        </div>
+        <div className="surface p-5">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">DC city</div>
+          <div className="num mt-2 text-2xl text-ink">{fmt.num(latest.score.dc_city, 2)}</div>
+          <div className="text-xs text-ink-dim">baseline {fmt.num(baseline?.dc_city ?? null, 2)}</div>
+        </div>
+        <div className="surface p-5">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">DC ASN</div>
+          <div className="num mt-2 text-2xl text-ink">{fmt.num(latest.score.dc_asn, 2)}</div>
+          <div className="text-xs text-ink-dim">baseline {fmt.num(baseline?.dc_asn ?? null, 2)}</div>
+        </div>
+      </section>
+
+      {/* Secondary stats */}
+      <section className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="surface p-5">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">Network impact (NIS)</div>
+          <div className="num mt-2 text-2xl text-ink">{fmt.num(latest.score.nis, 1)}</div>
+          <div className="text-xs text-ink-dim">stake-weighted Stakewiz wiz_score</div>
+        </div>
+        <div className="surface p-5">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">Validators / Stake</div>
+          <div className="num mt-2 text-2xl text-ink">
+            {latest.score.validator_count ?? '—'}
+          </div>
+          <div className="text-xs text-ink-dim">{fmt.sol(latest.score.total_stake_sol)} SOL total</div>
+        </div>
+        <div className="surface p-5">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">Placement coverage</div>
+          <div className="num mt-2 text-2xl text-ink">{fmt.pct(latest.score.placement_coverage)}</div>
+          <div className="text-xs text-ink-dim">of stake placed geographically</div>
+        </div>
+      </section>
+
+      {/* Trend chart */}
+      <section className="mt-12">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
+          GDI trend
+        </h2>
+        <div className="mt-4 surface p-4">
+          <TrendChart poolSeries={poolSeries} baselineSeries={baselineSeries} />
+        </div>
+      </section>
+
+      {/* Per-validator breakdown */}
+      <section className="mt-12">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
+          Validators (current epoch)
+        </h2>
+        <div className="surface mt-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-bg-muted/40 text-left text-xs uppercase tracking-[0.10em] text-ink-dim">
+              <tr>
+                <th className="py-3 pl-5 pr-3 font-semibold">Validator</th>
+                <th className="py-3 pr-3 font-semibold">Country</th>
+                <th className="py-3 pr-3 font-semibold">City</th>
+                <th className="py-3 pr-3 font-semibold">ASN</th>
+                <th className="py-3 pr-3 text-right font-semibold">wiz_score</th>
+                <th className="py-3 pr-5 text-right font-semibold">Stake</th>
+              </tr>
+            </thead>
+            <tbody>
+              {validatorsSorted.map((v) => (
+                <tr key={v.pubkey} className="border-t border-ring">
+                  <td className="py-3 pl-5 pr-3 font-mono text-xs text-ink-muted">{fmt.addr(v.pubkey)}</td>
+                  <td className="py-3 pr-3 text-ink">{v.country || <span className="text-ink-dim">—</span>}</td>
+                  <td className="py-3 pr-3 text-ink">{v.city || <span className="text-ink-dim">—</span>}</td>
+                  <td className="py-3 pr-3 text-ink">
+                    {v.asn ? (
+                      <>
+                        {v.asn}
+                        {v.asn_name && <span className="ml-1 text-xs text-ink-dim">{v.asn_name}</span>}
+                      </>
+                    ) : (
+                      <span className="text-ink-dim">—</span>
+                    )}
+                  </td>
+                  <td className="num py-3 pr-3 text-right text-ink-muted">{fmt.num(v.wiz_score, 1)}</td>
+                  <td className="num py-3 pr-5 text-right text-ink-muted">{fmt.sol(v.stake_sol)} SOL</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer className="mt-20 border-t border-ring pt-6 text-xs text-ink-dim">
+        Computed under {latest.score.methodology_version}. See{' '}
+        <Link href="/methodology" className="underline decoration-ring underline-offset-2 hover:text-ink">
+          methodology
+        </Link>{' '}
+        for the formula.
+      </footer>
+    </main>
+  );
+}
