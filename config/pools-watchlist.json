@@ -1,7 +1,93 @@
 {
-  "_comment": "Pools to track. Bootstrap list before SolanaCompass top-25 auto-discovery lands. Each entry must have an SPL-stake-pool family program owner (see POOL_PROGRAM_FAMILIES in src/lib/gdi/data-sources/rpc.ts). PR-able.",
+  "_comment": "Pools to track. Discovered via on-chain enumeration of SPL-stake-pool family programs (SPoo1Ku8..., SVSPxpvH..., SPMBzsVU...) sorted by total_lamports desc. Top 20 by TVL as of 2026-05-10. Names verified where known; rest will display as truncated addresses until named via PR.",
   "_format": "{ pool_address: string, name?: string, note?: string, added_at?: ISO8601 }",
+  "_seed_method": "rank-by-TVL via Helius getProgramAccounts on all 3 SPL-stake-pool family programs",
   "additions": [
+    {
+      "pool_address": "Hr9pzexrBge3vgmBNRR8u42CNQgBXdHm4UkUN2DH4a7r",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain. Largest SPL-stake-pool on Solana by TVL (~11.1M SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb",
+      "name": "JitoSOL",
+      "note": "Largest verified Solana LST by TVL. MEV-focused.",
+      "added_at": "2026-05-10"
+    },
+    {
+      "pool_address": "3fV1sdGeXaNEZj6EPDTpub82pYxcRXwt2oie6jkSzeWi",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~8.4M SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "8VpRhuxa7sUUepdY3kQiTmX9rS5vx4WgaXiAnXq4KCtr",
+      "name": "JupSOL",
+      "note": "Jupiter's liquid staking pool. Sanctum-Multi program.",
+      "added_at": "2026-05-10"
+    },
+    {
+      "pool_address": "DpooSqZRL3qCmiq82YyB4zWmLfH3iEqx2gy8f2B6zjru",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~1.6M SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "pSPcvR8GmG9aKDUbn9nbKYjkxt9hxMS7kF1qqKJaPqJ",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~1.5M SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "Fu9BYC6tWBo1KMKaP3CFoKfRhqv9akmy3DuYwnCyWiyC",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~1.3M SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "CtMyWsrUtAwXWiGr9WjHT5fC3p3fgV8cyGpLTo2LJzG1",
+      "name": "JSOL",
+      "note": "JPool's liquid staking token.",
+      "added_at": "2026-05-10"
+    },
+    {
+      "pool_address": "spp1mo6shdcrRyqDK2zdurJ8H5uttZE6H6oVjHxN1QN",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~1.1M SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "aero2ePURjuEgLKTzcUmF6RypBncBGd7pMUYCoSsVJ6",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~1.1M SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi",
+      "name": "bSOL",
+      "note": "BlazeStake / SolBlaze. Native SPL stake-pool.",
+      "added_at": "2026-05-10"
+    },
+    {
+      "pool_address": "edgejNWAqkePLpi5sHRxT9vHi7u3kSHP9cocABPKiWZ",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~836k SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "StKeDUdSu7jMSnPJ1MPqDnk3RdEwD2QbJaisHMebGhw",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~767k SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "jagEdDepWUgexiu4jxojcRWcVKKwFqgZBBuAoGu2BxM",
+      "name": "JagPool",
+      "note": "LATAM + Singapore + South Africa decentralisation focus. Closest peer to Definity on mission alignment.",
+      "added_at": "2026-05-10"
+    },
+    {
+      "pool_address": "9N69d9o5hqdfDLMiPdFT5VBXpEf4UXSTsbmYLKc9Njpa",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~536k SOL). Name unverified — TODO."
+    },
+    {
+      "pool_address": "CV6bkrUksMwcEC4jfLTJsbHwF3Y2YurZdWWua95Fpbtd",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~318k SOL). Name unverified — TODO."
+    },
     {
       "pool_address": "Bvbu55B991evqqhLtKcyTZjzQ4EQzRUwtf9T4CcpMmPL",
       "name": "Definity",
@@ -9,22 +95,19 @@
       "added_at": "2026-05-10"
     },
     {
-      "pool_address": "jagEdDepWUgexiu4jxojcRWcVKKwFqgZBBuAoGu2BxM",
-      "name": "JagPool",
-      "note": "LATAM + Singapore + South Africa decentralisation focus. Closest peer to Definity on mission alignment. Verified via solanacompass.com/stake-pools/jagEdDepWUgexiu4jxojcRWcVKKwFqgZBBuAoGu2BxM.",
-      "added_at": "2026-05-10"
+      "pool_address": "HQLwnQJFH7t9nBTP4vbdW4eHy62aecfDnj8te8VzqkFL",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~210k SOL). Name unverified — TODO."
     },
     {
-      "pool_address": "Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb",
-      "name": "JitoSOL",
-      "note": "Largest Solana LST by TVL. Yield-focused (MEV).",
-      "added_at": "2026-05-10"
+      "pool_address": "hy1oDeVCVRDGkxS26qLVDvRhDpZGfWJ6w9AMvwMegwL",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~197k SOL). Name unverified — TODO."
     },
     {
-      "pool_address": "8VpRhuxa7sUUepdY3kQiTmX9rS5vx4WgaXiAnXq4KCtr",
-      "name": "JupSOL",
-      "note": "Jupiter's liquid-staking pool. Single-validator (Triton) historically.",
-      "added_at": "2026-05-10"
+      "pool_address": "po1osKDWYF9oiVEGmzKA4eTs8eMveFRMox3bUKazGN2",
+      "added_at": "2026-05-10",
+      "note": "Discovered on-chain (~145k SOL). Name unverified — TODO."
     }
   ]
 }
