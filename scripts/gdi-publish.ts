@@ -137,15 +137,24 @@ async function main() {
   const pools = storage.listTrackedPools();
   const poolMeta = new Map(pools.map((p) => [p.pool_address, p]));
 
-  // Filter unscored pools (zero validators or null GDI) — they're tracked
-  // for future epochs but don't belong on the leaderboard until they have
-  // delegated stake. Surfaced in /var/lib/sgdi/logs/ instead so an operator
-  // can see "tracking but no stake" pools without the leaderboard polluting.
+  // Filter unscored / single-validator pools from the leaderboard:
+  //   - Pools with 0 validators or null GDI → no stake yet, can't be ranked.
+  //   - Pools with exactly 1 validator → institutional / single-staker
+  //     products, not really comparable to multi-validator LSTs (a pool's
+  //     "geographic decentralisation" is meaningless when there's only one
+  //     place to put stake). Kept in the data layer; surfaced separately.
+  const MIN_VALIDATORS_FOR_LEADERBOARD = 2;
   const scoredPools = latestScores.filter(
-    (s) => s.gdi_composite != null && (s.validator_count ?? 0) > 0,
+    (s) =>
+      s.gdi_composite != null &&
+      (s.validator_count ?? 0) >= MIN_VALIDATORS_FOR_LEADERBOARD,
   );
   const trackedButUnscored = latestScores.filter(
-    (s) => !(s.gdi_composite != null && (s.validator_count ?? 0) > 0),
+    (s) =>
+      !(
+        s.gdi_composite != null &&
+        (s.validator_count ?? 0) >= MIN_VALIDATORS_FOR_LEADERBOARD
+      ),
   );
 
   const leaderboard = {
@@ -164,14 +173,18 @@ async function main() {
     }),
     tracked_but_unscored: trackedButUnscored.map((s) => {
       const meta = poolMeta.get(s.pool_address);
+      const vc = s.validator_count ?? 0;
       return {
         pool_address: s.pool_address,
         pool_name: meta?.pool_name ?? null,
-        validator_count: s.validator_count ?? 0,
+        validator_count: vc,
+        gdi: s.gdi_composite,  // expose the score for the curious
         reason:
-          (s.validator_count ?? 0) === 0
+          vc === 0
             ? 'no_validators_in_pool'
-            : 'score_unavailable',
+            : vc === 1
+              ? 'single_validator_pool'
+              : 'score_unavailable',
       };
     }),
   };
