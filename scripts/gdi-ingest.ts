@@ -42,18 +42,24 @@ import {
 
 const WATCHLIST_PATH = resolve('./config/pools-watchlist.json');
 
-type Watchlist = {
-  additions?: { pool_address: string; note?: string }[];
+type WatchlistEntry = {
+  pool_address: string;
+  name?: string;
+  note?: string;
 };
 
-function readWatchlist(): string[] {
+type Watchlist = {
+  additions?: WatchlistEntry[];
+};
+
+function readWatchlist(): WatchlistEntry[] {
   let parsed: Watchlist;
   try {
     parsed = JSON.parse(readFileSync(WATCHLIST_PATH, 'utf8')) as Watchlist;
   } catch {
     return [];
   }
-  return (parsed.additions || []).map((a) => a.pool_address).filter(Boolean);
+  return (parsed.additions || []).filter((a) => a && a.pool_address);
 }
 
 function nowSeconds(): number {
@@ -107,7 +113,9 @@ async function main() {
 
   // Watchlist — bootstrap list of pools to track. Will be expanded later via
   // a SolanaCompass top-25 discovery script.
-  const pools = readWatchlist();
+  const watchlist = readWatchlist();
+  const pools = watchlist.map((w) => w.pool_address);
+  const watchlistByAddress = new Map(watchlist.map((w) => [w.pool_address, w]));
   log.info('watchlist.read', { count: pools.length });
   if (pools.length === 0) {
     log.warn('watchlist.empty', {
@@ -133,9 +141,10 @@ async function main() {
   for (const poolAddress of pools) {
     try {
       const d = await fetchPoolDelegations(rpc, poolAddress);
+      const watchlistEntry = watchlistByAddress.get(poolAddress);
       storage.upsertPool({
         pool_address: poolAddress,
-        pool_name: null,
+        pool_name: watchlistEntry?.name ?? null,
         pool_token_mint: d.poolMint,
         pool_program: d.poolProgram,
         is_tracked: 1,
