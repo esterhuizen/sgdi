@@ -10,20 +10,27 @@ export const revalidate = 60;
 const fmt = {
   num: (v: number | null | undefined, d = 2) =>
     v == null ? '—' : v.toFixed(d),
-  int: (v: number | null | undefined) => (v == null ? '—' : String(v)),
+  sol: (v: number | null | undefined) => {
+    if (v == null) return '—';
+    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+    if (v >= 10_000) return `${(v / 1_000).toFixed(0)}k`;
+    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+    return v.toFixed(0);
+  },
+  truncAddr: (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`,
 };
 
 export default async function HomePage() {
   const data = await loadLeaderboard();
-  const baseline = data?.network_baseline?.gdi ?? null;
-  const aboveBaseline =
-    data && baseline != null
-      ? data.pools.filter((p) => (p.gdi ?? 0) > baseline).length
-      : 0;
-  const belowBaseline =
-    data && baseline != null
-      ? data.pools.filter((p) => (p.gdi ?? 0) <= baseline).length
-      : 0;
+  const sortedPools =
+    data?.pools
+      ?.slice()
+      .sort((a, b) => (b.gdi ?? -Infinity) - (a.gdi ?? -Infinity)) ?? [];
+  const topPool = sortedPools[0] ?? null;
+  const totalTrackedStake = sortedPools.reduce(
+    (sum, p) => sum + (p.total_stake_sol ?? 0),
+    0,
+  );
 
   return (
     <main className="min-h-screen">
@@ -31,26 +38,24 @@ export default async function HomePage() {
       <div className="h-[3px] w-full bg-gradient-to-r from-accent-green via-accent-purple to-accent-purple" />
 
       <div className="container-narrow pt-12 pb-24 md:pt-16">
-        {/* HERO */}
+        {/* HERO — title, why, factors. Three lines, no rhetoric. */}
         <header className="max-w-3xl">
-          <div className="text-xs font-semibold uppercase tracking-[0.22em] text-ink-dim">
-            SGDI · Solana Geographic Decentralisation Index
-          </div>
-          <h1 className="mt-5 font-display text-5xl font-bold tracking-tight2 text-ink md:text-[64px] md:leading-[1.05]">
-            The decentralisation leaderboard for{' '}
-            <span className="bg-gradient-to-r from-accent-green to-accent-purple bg-clip-text text-transparent">
-              Solana stake pools
-            </span>
-            .
+          <h1 className="font-display text-4xl font-bold tracking-tight2 text-ink md:text-[56px] md:leading-[1.05]">
+            Solana Stake Pool Decentralisation Index
           </h1>
           <p className="mt-6 text-lg leading-relaxed text-ink-muted md:text-xl md:leading-relaxed">
-            Most LSTs concentrate stake in a handful of validators in already-popular
-            regions. A few don&apos;t.{' '}
-            <strong className="text-ink">Stake with the ones that don&apos;t</strong> — same yield, better
-            outcomes for the network.
+            Stake concentration on a few cities, network operators, or countries is real
+            risk to Solana. Pools that distribute stake away from those clusters strengthen
+            the network.
+          </p>
+          <p className="mt-3 text-base leading-relaxed text-ink-muted md:text-lg">
+            We measure the <strong className="text-ink">country</strong>,{' '}
+            <strong className="text-ink">city</strong>, and{' '}
+            <strong className="text-ink">network operator</strong> (ASN) of every validator
+            in every pool, every epoch — and rank pools by how widely their stake is spread.
           </p>
 
-          <div className="mt-8 flex flex-wrap gap-3 text-sm">
+          <div className="mt-7 flex flex-wrap gap-3 text-sm">
             <Link
               href="/methodology"
               className="inline-flex items-center gap-1 rounded-full border border-ring bg-bg px-4 py-2 text-ink hover:border-ink"
@@ -79,22 +84,21 @@ export default async function HomePage() {
           </div>
         </header>
 
-        {/* STAT STRIP */}
+        {/* STAT STRIP — neutral facts about what you're looking at, no flex */}
         {data && (
           <section
-            aria-label="Network at a glance"
+            aria-label="Leaderboard at a glance"
             className="mt-14 grid gap-3 sm:grid-cols-3"
           >
             <StatCard
-              label="Network baseline GDI"
-              value={fmt.num(baseline, 2)}
-              sub={`${data.network_baseline?.validator_count ?? '—'} active validators`}
+              label="Top pool"
+              value={topPool?.pool_name || (topPool ? fmt.truncAddr(topPool.pool_address) : '—')}
+              sub={topPool ? `GDI ${fmt.num(topPool.gdi, 2)}` : ''}
             />
             <StatCard
-              label="Pools above baseline"
-              value={`${aboveBaseline} / ${aboveBaseline + belowBaseline}`}
-              sub="actively reducing concentration"
-              tone="good"
+              label="Tracked"
+              value={`${sortedPools.length} pools`}
+              sub={totalTrackedStake > 0 ? `${fmt.sol(totalTrackedStake)} SOL combined` : ''}
             />
             <StatCard
               label="Solana epoch"
@@ -106,22 +110,19 @@ export default async function HomePage() {
 
         {/* LEADERBOARD */}
         <section className="mt-12">
-          <div className="mb-4 flex items-baseline justify-between">
+          <div className="mb-2 flex items-baseline justify-between">
             <h2 className="font-display text-xl font-semibold text-ink md:text-2xl">
               Stake pool leaderboard
             </h2>
             {data?.pools && (
               <span className="text-xs text-ink-dim">
-                {data.pools.length} pools · sorted by GDI desc
+                ranked by GDI
               </span>
             )}
           </div>
           <p className="mb-4 max-w-2xl text-sm leading-relaxed text-ink-muted">
-            Pools <strong className="text-success">above the baseline</strong> are
-            preferentially delegating to less-popular places than the network
-            average — directly reducing concentration. Pools{' '}
-            <strong className="text-bad">below the baseline</strong> are reinforcing
-            already-popular spots.
+            Pools at the top of this list contribute most to Solana&apos;s decentralisation.
+            Click a pool name for the per-validator breakdown.
           </p>
 
           {data ? (
@@ -140,45 +141,6 @@ export default async function HomePage() {
               </p>
             </div>
           )}
-        </section>
-
-        {/* WHAT IT MEASURES */}
-        <section className="mt-16 grid gap-8 md:grid-cols-3">
-          <FactBlock
-            label="What's measured"
-            title="Where stake actually lives"
-            body={
-              <>
-                For every pool, we measure how its stake is distributed
-                geographically (country, city) and topologically (network
-                operator / ASN). Stake in underweight regions scores higher
-                than stake in already-saturated ones.
-              </>
-            }
-          />
-          <FactBlock
-            label="Why it matters"
-            title="Concentration is a real risk"
-            body={
-              <>
-                When stake clusters on a few cities, ASNs, or countries,
-                the network is one outage / regulatory action / cloud
-                provider failure away from major disruption. A diverse
-                stake distribution is healthier — for everyone.
-              </>
-            }
-          />
-          <FactBlock
-            label="How to use it"
-            title="Same yield, better outcomes"
-            body={
-              <>
-                Yield differences between major LSTs are small. Decentralisation
-                contribution differences are large. Pick a pool above the
-                baseline and you&apos;re strengthening Solana on autopilot.
-              </>
-            }
-          />
         </section>
 
         {/* FOOTER */}
@@ -220,21 +182,17 @@ function StatCard({
   label,
   value,
   sub,
-  tone,
 }: {
   label: string;
   value: string;
   sub?: string;
-  tone?: 'good' | 'bad';
 }) {
-  const valueColor =
-    tone === 'good' ? 'text-success' : tone === 'bad' ? 'text-bad' : 'text-ink';
   return (
     <div className="surface p-5">
       <div className="text-xs font-medium uppercase tracking-[0.10em] text-ink-dim">
         {label}
       </div>
-      <div className={`num mt-2 font-display text-3xl font-bold ${valueColor}`}>
+      <div className="num mt-2 font-display text-3xl font-bold text-ink">
         {value}
       </div>
       {sub && <div className="mt-1 text-xs text-ink-dim">{sub}</div>}
@@ -242,22 +200,3 @@ function StatCard({
   );
 }
 
-function FactBlock({
-  label,
-  title,
-  body,
-}: {
-  label: string;
-  title: string;
-  body: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="text-xs font-medium uppercase tracking-[0.18em] text-ink-dim">
-        {label}
-      </div>
-      <h3 className="mt-2 font-display text-lg font-semibold text-ink">{title}</h3>
-      <p className="mt-3 text-sm leading-relaxed text-ink-muted">{body}</p>
-    </div>
-  );
-}

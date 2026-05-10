@@ -77,6 +77,8 @@ export type PoolLatest = {
   pool: { address: string; name: string | null; program: string | null; token_mint: string | null };
   score: FormattedScore;
   network_baseline: FormattedBaseline | null;
+  rank: number | null;
+  total_ranked: number;
   validators: PoolValidator[];
 };
 

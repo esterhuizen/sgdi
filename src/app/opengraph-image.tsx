@@ -2,7 +2,7 @@ import { ImageResponse } from 'next/og';
 import { loadLeaderboard } from '@/lib/data';
 
 // Auto-generated 1200×630 PNG for tweet/Slack/Discord unfurls.
-// Renders the top-5 pools + network baseline at the current epoch.
+// Renders the top-5 pools at the current epoch.
 //
 // Next.js's ImageResponse (powered by Satori) runs server-side; the JSX
 // here is a simplified subset (no Tailwind, only inline CSS / flex).
@@ -13,22 +13,23 @@ export const contentType = 'image/png';
 // Re-render at most every 60s — matches the page revalidate.
 export const revalidate = 60;
 export const alt =
-  'Solana Geographic Decentralisation Index — leaderboard ranking stake pools by stake-weighted decentralisation contribution.';
+  'Solana Stake Pool Decentralisation Index — every pool ranked by where its stake actually lives.';
 
 const fmt = {
   num: (v: number | null | undefined, d = 2) =>
     v == null ? '—' : v.toFixed(d),
-  pct: (delta: number | null | undefined) => {
-    if (delta == null || !Number.isFinite(delta)) return '—';
-    const sign = delta > 0 ? '+' : '';
-    return `${sign}${delta.toFixed(1)}%`;
+  sol: (v: number | null | undefined) => {
+    if (v == null) return '—';
+    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+    if (v >= 10_000) return `${(v / 1_000).toFixed(0)}k`;
+    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+    return v.toFixed(0);
   },
   truncAddr: (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`,
 };
 
 export default async function Image() {
   const data = await loadLeaderboard();
-  const baseline = data?.network_baseline?.gdi ?? null;
   const sortedPools =
     data?.pools
       ?.filter((p) => p.gdi != null)
@@ -69,25 +70,14 @@ export default async function Image() {
           <div
             style={{
               display: 'flex',
-              fontSize: 18,
-              letterSpacing: 4,
-              textTransform: 'uppercase',
-              color: '#52566a',
-              fontWeight: 600,
-            }}
-          >
-            SGDI · Solana Geographic Decentralisation Index
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              fontSize: 56,
+              fontSize: 52,
               fontWeight: 700,
-              marginTop: 12,
               letterSpacing: '-0.02em',
+              maxWidth: 1050,
+              lineHeight: 1.05,
             }}
           >
-            Where Solana stake actually lives.
+            Solana Stake Pool Decentralisation Index
           </div>
           {data ? (
             <div
@@ -98,8 +88,7 @@ export default async function Image() {
                 marginTop: 16,
               }}
             >
-              Top 5 pools by GDI · epoch {data.epoch} · network baseline GDI{' '}
-              {fmt.num(baseline, 3)}
+              Top 5 pools by GDI · epoch {data.epoch} · {sortedPools.length === 5 ? `${data.pools.length} pools tracked` : ''}
             </div>
           ) : (
             <div
@@ -139,11 +128,11 @@ export default async function Image() {
               color: '#52566a',
             }}
           >
-            <div style={{ width: 50, display: 'flex' }}>#</div>
+            <div style={{ width: 60, display: 'flex' }}>#</div>
             <div style={{ flex: 1, display: 'flex' }}>Pool</div>
             <div
               style={{
-                width: 130,
+                width: 160,
                 display: 'flex',
                 justifyContent: 'flex-end',
               }}
@@ -152,31 +141,26 @@ export default async function Image() {
             </div>
             <div
               style={{
-                width: 170,
-                display: 'flex',
-                justifyContent: 'flex-end',
-              }}
-            >
-              vs baseline
-            </div>
-            <div
-              style={{
-                width: 130,
+                width: 160,
                 display: 'flex',
                 justifyContent: 'flex-end',
               }}
             >
               Validators
             </div>
+            <div
+              style={{
+                width: 180,
+                display: 'flex',
+                justifyContent: 'flex-end',
+              }}
+            >
+              Stake
+            </div>
           </div>
 
           {/* Rows */}
           {sortedPools.map((p, i) => {
-            const delta =
-              baseline && baseline > 0 && p.gdi != null
-                ? ((p.gdi - baseline) / baseline) * 100
-                : null;
-            const above = delta != null && delta > 0;
             return (
               <div
                 key={p.pool_address}
@@ -189,7 +173,7 @@ export default async function Image() {
                 }}
               >
                 <div
-                  style={{ width: 50, display: 'flex', color: '#8a8e9e' }}
+                  style={{ width: 60, display: 'flex', color: '#8a8e9e', fontWeight: 600 }}
                 >
                   {i + 1}
                 </div>
@@ -219,31 +203,18 @@ export default async function Image() {
                 </div>
                 <div
                   style={{
-                    width: 130,
+                    width: 160,
                     display: 'flex',
                     justifyContent: 'flex-end',
                     fontVariantNumeric: 'tabular-nums',
-                    fontWeight: 600,
+                    fontWeight: 700,
                   }}
                 >
                   {fmt.num(p.gdi, 2)}
                 </div>
                 <div
                   style={{
-                    width: 170,
-                    display: 'flex',
-                    justifyContent: 'flex-end',
-                    fontVariantNumeric: 'tabular-nums',
-                    color: above ? '#22a36c' : '#c2364a',
-                    fontWeight: 600,
-                  }}
-                >
-                  {above ? '▲ ' : '▼ '}
-                  {fmt.pct(delta)}
-                </div>
-                <div
-                  style={{
-                    width: 130,
+                    width: 160,
                     display: 'flex',
                     justifyContent: 'flex-end',
                     color: '#52566a',
@@ -251,6 +222,17 @@ export default async function Image() {
                   }}
                 >
                   {p.validator_count ?? '—'}
+                </div>
+                <div
+                  style={{
+                    width: 180,
+                    display: 'flex',
+                    justifyContent: 'flex-end',
+                    color: '#52566a',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {fmt.sol(p.total_stake_sol)} SOL
                 </div>
               </div>
             );
@@ -286,7 +268,7 @@ export default async function Image() {
             Open methodology · reproducible · Apache-2.0
           </div>
           <div style={{ display: 'flex', fontWeight: 600, color: '#0d1014' }}>
-            sgdi.app
+            gdindex.app
           </div>
         </div>
       </div>

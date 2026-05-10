@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# sgdi-scenario — wrapper for the SGDI scenario / what-if CLI.
+#
+# Auto-elevates to the 'definity' service user (needed for SQLite WAL access)
+# and runs from the SGDI project directory. Forwards all args.
+#
+# Usage:
+#   sgdi-scenario                            # show current allocation
+#   sgdi-scenario --optimize --top 10        # find optimal allocation
+#   sgdi-scenario --delta <pubkey>=+5000     # what-if: shift stake
+#   sgdi-scenario --help                     # full help
+
+set -euo pipefail
+
+PROJECT_DIR="/home/ubuntu/build/sgdi"
+DB_PATH="/var/lib/sgdi/gdi.db"
+SVC_USER="definity"
+
+if [[ "$(id -un)" != "$SVC_USER" ]]; then
+  exec sudo -u "$SVC_USER" "$0" "$@"
+fi
+
+cd "$PROJECT_DIR"
+SGDI_DB_PATH="$DB_PATH" exec npm run --silent scenario -- "$@"

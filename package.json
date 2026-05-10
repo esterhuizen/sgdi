@@ -15,7 +15,8 @@
     "publish": "node --experimental-strip-types scripts/gdi-publish.ts",
     "backfill": "node --experimental-strip-types scripts/gdi-backfill.ts",
     "daily-report": "node --experimental-strip-types scripts/gdi-daily-report.ts",
-    "test": "node --test --experimental-strip-types tests/scoring.test.ts"
+    "scenario": "node --experimental-strip-types scripts/gdi-scenario.ts",
+    "test": "node --test --experimental-strip-types tests/scoring.test.ts tests/scenario.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

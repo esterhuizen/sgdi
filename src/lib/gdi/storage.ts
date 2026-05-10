@@ -191,10 +191,17 @@ export type IngestionRun = {
 
 export type Storage = ReturnType<typeof openStorage>;
 
-export function openStorage(dbPath: string = DEFAULT_DB_PATH) {
-  mkdirSync(dirname(dbPath), { recursive: true });
-  const db: Db = new Database(dbPath);
-  db.exec(SCHEMA_SQL);
+export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?: boolean } = {}) {
+  // Read-only mode is for analysis tools (e.g. gdi-scenario) that should
+  // never mutate the DB and may be invoked by users without write access
+  // to the data directory.
+  if (!opts.readonly) {
+    mkdirSync(dirname(dbPath), { recursive: true });
+  }
+  const db: Db = new Database(dbPath, opts.readonly ? { readonly: true } : {});
+  if (!opts.readonly) {
+    db.exec(SCHEMA_SQL);
+  }
 
   const stmt = {
     upsertEpoch: db.prepare(`

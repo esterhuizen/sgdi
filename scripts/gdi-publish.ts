@@ -192,6 +192,10 @@ async function main() {
   await atomicWriteJson(join(OUTPUT_DIR, `leaderboard-${latestEpoch}.json`), leaderboard);
 
   // 4. per-pool latest + history
+  // Rank lookup: scoredPools is already sorted by GDI desc; pool's rank = index + 1.
+  const rankByAddress = new Map(scoredPools.map((s, i) => [s.pool_address, i + 1]));
+  const totalRanked = scoredPools.length;
+
   let poolsPublished = 0;
   for (const pool of pools) {
     const history = storage.listScoresForPool(pool.pool_address);
@@ -223,6 +227,10 @@ async function main() {
       },
       score: formatPoolScore(latestScore),
       network_baseline: latestBaseline ? formatBaseline(latestBaseline) : null,
+      // Rank within the leaderboard (1-indexed). Null if pool isn't ranked
+      // (single-validator pools, etc. — appear in tracked_but_unscored).
+      rank: rankByAddress.get(pool.pool_address) ?? null,
+      total_ranked: totalRanked,
       validators: validatorsInline,
     });
     await atomicWriteJson(join(poolDir, 'history.json'), {

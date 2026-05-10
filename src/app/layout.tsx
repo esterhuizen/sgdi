@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter, Manrope } from 'next/font/google';
 import './globals.css';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://sgdi.app';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://gdindex.app';
 
 // Self-hosted via next/font — no third-party CSS request at runtime.
 const inter = Inter({
@@ -26,12 +26,12 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: 'SGDI — Solana Geographic Decentralisation Index',
-    template: '%s — SGDI',
+    default: 'Solana Stake Pool Decentralisation Index',
+    template: '%s — Solana Stake Pool Decentralisation Index',
   },
   description:
-    'Per-epoch leaderboard ranking Solana stake pools by stake-weighted geographic decentralisation. Pick a pool above the network baseline to earn the same yield while strengthening the network.',
-  applicationName: 'SGDI',
+    'Every Solana stake pool ranked by how widely its stake is spread — country, city, and network operator of every validator, every epoch.',
+  applicationName: 'Solana Stake Pool Decentralisation Index',
   keywords: [
     'Solana',
     'stake pool',
@@ -43,17 +43,17 @@ export const metadata: Metadata = {
     'Nakamoto coefficient',
   ],
   openGraph: {
-    title: 'SGDI — Solana Geographic Decentralisation Index',
+    title: 'Solana Stake Pool Decentralisation Index',
     description:
-      'Per-epoch leaderboard ranking Solana stake pools by stake-weighted geographic decentralisation.',
+      'Every Solana stake pool ranked by how widely its stake is spread — country, city, and network operator of every validator, every epoch.',
     url: SITE_URL,
-    siteName: 'SGDI',
+    siteName: 'Solana Stake Pool Decentralisation Index',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'SGDI — Solana Geographic Decentralisation Index',
-    description: 'Open leaderboard of Solana stake pools by geographic decentralisation.',
+    title: 'Solana Stake Pool Decentralisation Index',
+    description: 'Open leaderboard of Solana stake pools ranked by geographic decentralisation.',
   },
   robots: { index: true, follow: true },
 };

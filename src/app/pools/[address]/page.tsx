@@ -40,13 +40,9 @@ export default async function PoolDetailPage({ params }: Props) {
 
   if (!latest) notFound();
 
-  const baseline = latest.network_baseline;
-  const cmp =
-    latest.score.gdi != null && baseline?.gdi != null && baseline.gdi !== 0
-      ? ((latest.score.gdi - baseline.gdi) / baseline.gdi) * 100
-      : null;
-
-  // Build trend chart series
+  // Build trend chart series. Baseline series stays — useful as a *visual*
+  // backdrop for the pool's GDI line, even though we no longer surface
+  // "vs baseline" deltas in the UI.
   const poolSeries = (history?.history || []).map((s) => ({ epoch: s.epoch, value: s.gdi }));
   const epochSet = new Set(poolSeries.map((p) => p.epoch));
   const baselineSeries =
@@ -76,37 +72,34 @@ export default async function PoolDetailPage({ params }: Props) {
         )}
       </header>
 
-      {/* Score summary */}
+      {/* Score summary — leads with rank, sub-scores explain the components */}
       <section className="mt-10 grid gap-4 md:grid-cols-4">
         <div className="surface p-5">
           <div className="text-xs uppercase tracking-wider text-ink-dim">GDI</div>
           <div className="num mt-2 text-3xl font-semibold text-ink">{fmt.num(latest.score.gdi, 3)}</div>
-          {cmp != null && (
-            <div
-              className={
-                'mt-1 text-xs ' +
-                (cmp > 0 ? 'text-success' : cmp < 0 ? 'text-bad' : 'text-ink-dim')
-              }
-            >
-              {cmp > 0 ? '▲' : cmp < 0 ? '▼' : '–'} {cmp > 0 ? '+' : ''}
-              {cmp.toFixed(1)}% vs baseline {fmt.num(baseline?.gdi ?? null, 3)}
+          {latest.rank != null && latest.total_ranked > 0 ? (
+            <div className="mt-1 text-xs text-ink-muted">
+              Rank <span className="font-semibold text-ink">#{latest.rank}</span>{' '}
+              <span className="text-ink-dim">of {latest.total_ranked}</span>
             </div>
+          ) : (
+            <div className="mt-1 text-xs text-ink-dim">unranked this epoch</div>
           )}
         </div>
         <div className="surface p-5">
           <div className="text-xs uppercase tracking-wider text-ink-dim">DC country</div>
           <div className="num mt-2 text-2xl text-ink">{fmt.num(latest.score.dc_country, 2)}</div>
-          <div className="text-xs text-ink-dim">baseline {fmt.num(baseline?.dc_country ?? null, 2)}</div>
+          <div className="text-xs text-ink-dim">geographic spread by country</div>
         </div>
         <div className="surface p-5">
           <div className="text-xs uppercase tracking-wider text-ink-dim">DC city</div>
           <div className="num mt-2 text-2xl text-ink">{fmt.num(latest.score.dc_city, 2)}</div>
-          <div className="text-xs text-ink-dim">baseline {fmt.num(baseline?.dc_city ?? null, 2)}</div>
+          <div className="text-xs text-ink-dim">geographic spread by city</div>
         </div>
         <div className="surface p-5">
           <div className="text-xs uppercase tracking-wider text-ink-dim">DC ASN</div>
           <div className="num mt-2 text-2xl text-ink">{fmt.num(latest.score.dc_asn, 2)}</div>
-          <div className="text-xs text-ink-dim">baseline {fmt.num(baseline?.dc_asn ?? null, 2)}</div>
+          <div className="text-xs text-ink-dim">network operator spread</div>
         </div>
       </section>
 
