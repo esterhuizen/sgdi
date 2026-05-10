@@ -1,0 +1,37 @@
+# dependencies
+/node_modules
+
+# build output
+/.next
+/out
+/dist
+
+# next.js telemetry / typegen
+/next-env.d.ts
+/.tsbuildinfo
+
+# env files — NEVER commit (this repo is public)
+.env
+.env.local
+.env.production
+.env.*.local
+
+# generated data — pipeline outputs
+/public/gdi/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# logs
+*.log
+/var/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# misc
+.tsbuildinfo
+.eslintcache

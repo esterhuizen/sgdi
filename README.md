@@ -1,0 +1,119 @@
+# SGDI — Solana Geographic Decentralisation Index
+
+A public, per-epoch leaderboard ranking Solana stake pools by **stake-weighted geographic decentralisation**. Live at [sgdi.app](https://sgdi.app).
+
+The metric, the data, and the methodology are open. The numbers are independently reproducible from on-chain data and a small set of public APIs.
+
+## What it answers
+
+> Which Solana stake pools are actually distributing stake across geographies, ASNs, and cities — and which are concentrating it?
+
+For each pool, every Solana epoch (≈ 2–3 days), SGDI computes:
+
+- **eN_country** — effective number of countries the pool's stake is spread across
+- **eN_city** — effective number of cities
+- **eN_ASN** — effective number of distinct network operators
+- **GDI** — geometric mean of the three (the headline number)
+- **Network Impact Score** — stake-weighted Stakewiz `wiz_score`, captures whether the pool delegates to validators that strengthen the network as a whole
+
+5-epoch and 10-epoch rolling averages are shown alongside per-epoch numbers (per-epoch is noisy; rolling is the trustworthy signal).
+
+A **network baseline GDI** is also computed from the entire active validator set. Pools above the baseline are improving network decentralisation; pools below are concentrating.
+
+## Why it exists
+
+Stake concentration is a real risk to Solana — both at the validator and at the pool level. Most LST products compete on yield. SGDI exposes a different dimension: where, geographically and topologically, does each pool's stake actually live?
+
+The methodology is named neutrally so it can credibly outlive any one publisher. SGDI is initially built and maintained by [Definity](https://definity.finance), with the explicit intent of handing stewardship to a neutral party (e.g. Stakewiz, Solana Compass, or the Solana Foundation) once the project has a track record. Repository is public, methodology is open, scores are reproducible — anyone can audit, fork, or run their own.
+
+## How to read the leaderboard
+
+- **Default sort**: composite GDI, descending. Click any sub-score column to re-sort.
+- **Trend arrow**: 5-epoch rolling change. Up = decentralisation improving over recent epochs.
+- **Network baseline line**: pools above it are improving network decentralisation; pools below are actively concentrating stake into already-popular validators.
+
+## Methodology in one screen
+
+For each dimension D ∈ {country, city, ASN}, with `pᵢ` = fraction of pool stake delegated to validators in category `i`:
+
+```
+eN_D  =  exp( − Σ pᵢ · ln(pᵢ) )         # stake-weighted "effective number"
+GDI   =  ( eN_country · eN_city · eN_ASN )^(1/3)   # geometric mean
+NIS   =  Σ wᵥ · stakewiz_wiz_score(v)    # network impact, secondary signal
+```
+
+Geometric mean penalises being good on one dimension and poor on another — distinct risk classes shouldn't average linearly.
+
+Full methodology, sources, limitations, and version history at [sgdi.app/methodology](https://sgdi.app/methodology).
+
+## Data sources
+
+- **Helius RPC** — pool → validator → stake mapping (current epoch)
+- **Stakewiz** — IP-derived validator country / city / ASN, plus `wiz_score`
+- **Validators.app** — cross-reference + fallback for validator metadata
+
+Trust ordering: Stakewiz primary → Validators.app cross-reference → every disagreement logged.
+
+## Project layout
+
+```
+sgdi/
+├── README.md  CONTRIBUTING.md  LICENSE        Apache-2.0
+├── package.json  next.config.js  tsconfig.json
+├── scripts/
+│   ├── gdi-ingest.mjs           every-30-min epoch detection + full pipeline
+│   ├── gdi-publish.mjs          SQLite → static JSON snapshot
+│   ├── gdi-backfill.mjs         one-shot: walk back N epochs at launch
+│   └── gdi-daily-report.mjs     nightly digest from run logs
+├── src/
+│   ├── app/                     leaderboard, pool detail, methodology
+│   ├── components/              UI (incl. hand-rolled SVG trend chart)
+│   └── lib/gdi/
+│       ├── data-sources/        rpc.ts · stakewiz.ts · validators-app.ts
+│       ├── enrichment.ts        validator metadata refresh + dedup
+│       ├── scoring.ts           PURE FUNCTION — eN, GDI, NIS
+│       ├── storage.ts           thin SQLite repo (better-sqlite3, sync)
+│       └── logger.ts            structured JSONL run logs
+├── config/
+│   └── pools-watchlist.json     manual additions to the auto-detected top-25
+├── deploy/                      systemd units, nginx vhost
+└── tests/
+    ├── scoring.test.ts          pure-function unit tests
+    └── e2e/known-epoch.test.ts  ingest a fixture, assert scores
+```
+
+## Running locally
+
+```bash
+cp .env.example .env
+$EDITOR .env                       # add HELIUS_RPC_URL + VALIDATORS_APP_TOKEN
+npm install
+npm run ingest                     # capture current epoch (no-op if already)
+npm run publish                    # generate public/gdi/*.json
+npm run dev                        # http://localhost:3000
+```
+
+## Reproducing a published score
+
+```bash
+git clone https://github.com/esterhuizen/sgdi.git && cd sgdi
+npm install && cp .env.example .env && $EDITOR .env
+npm run backfill -- --epoch=850   # or whichever epoch
+sqlite3 var/sgdi.db "select * from pool_scores where epoch = 850"
+```
+
+The number you compute should match the corresponding entry in `public/gdi/leaderboard-850.json` on production. If it doesn't, please [file an issue](https://github.com/esterhuizen/sgdi/issues) — that's a methodology drift we want to catch.
+
+## Contributing
+
+Methodology changes follow [CONTRIBUTING.md](./CONTRIBUTING.md) — tl;dr there's a versioned formula, bumping it is a deliberate process, and historical scores remain reproducible under their original version.
+
+Operational improvements (better data sources, faster ingest, tighter UI) are welcome via PR. Open an issue first if it's a non-trivial change.
+
+## License
+
+Apache-2.0. See [LICENSE](./LICENSE).
+
+---
+
+Built and maintained by [Definity](https://definity.finance) — a Solana stake pool focused on geographic decentralisation. The methodology is named neutrally and the codebase is structured for handoff to a neutral steward.

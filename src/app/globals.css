@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  font-feature-settings: 'tnum';
+}
+
+body {
+  font-feature-settings: 'tnum';
+}
+
+@layer components {
+  .container-narrow {
+    @apply mx-auto max-w-5xl px-5 md:px-8;
+  }
+
+  .surface {
+    @apply rounded-xl border border-ring bg-bg shadow-sm;
+  }
+
+  .pill {
+    @apply inline-flex items-center rounded-full border border-ring bg-bg-muted px-2.5 py-0.5 text-xs font-medium text-ink-muted;
+  }
+
+  /* Tabular numerics on every numeric cell — non-negotiable for a data site. */
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+}
