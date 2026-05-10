@@ -1,0 +1,39 @@
+# /etc/systemd/system/gdi-watchdog.service
+#
+# Hourly health check on the ingest pipeline. Reads ingestion_runs from
+# SQLite (read-only) and fires a Telegram alert if no successful ingest
+# has happened in the last SGDI_WATCHDOG_STALE_HOURS hours (default 4).
+#
+# Catches the failure modes that the inline alert in gdi-ingest.ts can't:
+#   - timer not firing
+#   - process killed mid-run (no final 'failed' row written)
+#   - host was down across an epoch boundary
+#
+# Suppresses repeat alerts within SGDI_WATCHDOG_COOLDOWN_HOURS (default 6)
+# to avoid spamming during a long outage.
+
+[Unit]
+Description=SGDI ingest staleness watchdog
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=sgdi
+Group=sgdi
+WorkingDirectory=/var/www/sgdi/current
+Environment=NODE_ENV=production
+Environment=SGDI_DB_PATH=/var/lib/sgdi/gdi.db
+Environment=SGDI_DATA_DIR=/var/lib/sgdi
+EnvironmentFile=-/etc/default/sgdi.env
+ExecStart=/usr/bin/node --experimental-strip-types scripts/gdi-watchdog.ts
+TimeoutStartSec=60
+
+# Hardening — same template as gdi-ingest.service
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/sgdi
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true

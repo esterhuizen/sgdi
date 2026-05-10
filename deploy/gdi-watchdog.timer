@@ -1,0 +1,17 @@
+# /etc/systemd/system/gdi-watchdog.timer
+#
+# Hourly. Pairs with gdi-watchdog.service (oneshot).
+
+[Unit]
+Description=Hourly SGDI ingest staleness check
+Requires=gdi-watchdog.service
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+AccuracySec=1min
+Persistent=true
+Unit=gdi-watchdog.service
+
+[Install]
+WantedBy=timers.target

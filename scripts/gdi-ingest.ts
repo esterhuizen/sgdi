@@ -363,6 +363,26 @@ async function main() {
     duration_s: nowSeconds() - startedAt,
   });
 
+  // Tripwire: alert on hard failures. 'partial' is intentionally NOT alerted
+  // — most partials are 1-2 transient Helius hiccups that resolve on their
+  // own (the next epoch's run replaces them). 'failed' means we got zero
+  // pool scores for this epoch, which is the real "something broke" signal.
+  if (status === 'failed') {
+    const { sendSgdiAlert } = await import('../src/lib/gdi/telegram.ts');
+    const result = await sendSgdiAlert(
+      `⚠ Ingest FAILED for epoch ${epoch}\n` +
+      `Pools attempted: ${pools.length}\n` +
+      `Pools failed: ${failed}\n` +
+      `Run ID: ${logger.runId}\n` +
+      `Will retry on next 30-min timer fire.`,
+    );
+    if (!result.ok) {
+      log.warn('alert.skipped', { reason: result.reason, detail: result.detail });
+    } else {
+      log.info('alert.sent', { kind: 'ingest_failed' });
+    }
+  }
+
   storage.close();
 }
 
