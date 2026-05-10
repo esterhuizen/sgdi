@@ -137,8 +137,12 @@ async function main() {
   let failed = 0;
   const successfulPools: string[] = [];
 
-  // 3. Per-pool snapshot.
-  for (const poolAddress of pools) {
+  // 3. Per-pool snapshot. Small delay between pools to be polite to the RPC
+  // provider — at 20+ pools × 3 calls each, bursty traffic trips Helius rate
+  // limiting. 250ms between pools = ~5s added to a full ingest, negligible.
+  const POOL_FETCH_DELAY_MS = 250;
+  for (const [poolIdx, poolAddress] of pools.entries()) {
+    if (poolIdx > 0) await new Promise((r) => setTimeout(r, POOL_FETCH_DELAY_MS));
     try {
       const d = await fetchPoolDelegations(rpc, poolAddress);
       const watchlistEntry = watchlistByAddress.get(poolAddress);

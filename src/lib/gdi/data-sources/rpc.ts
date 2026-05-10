@@ -66,7 +66,7 @@ export class RpcError extends Error {
 export function createRpc({ url, timeoutMs = 30_000, logger }: RpcOptions) {
   let id = 0;
 
-  async function call<T>(method: string, params: unknown[]): Promise<T> {
+  async function singleCall<T>(method: string, params: unknown[]): Promise<T> {
     const reqId = ++id;
     const startedAt = Date.now();
     let res: Response;
@@ -97,11 +97,35 @@ export function createRpc({ url, timeoutMs = 30_000, logger }: RpcOptions) {
 
     const j = (await res.json()) as { result?: T; error?: { code: number; message: string } };
     if (j.error) {
+      // Helius returns HTTP 200 + JSON-RPC error code -32429 for rate-limit.
+      // Surface the rate-limit code explicitly so the retry layer can detect it.
       logger?.warn('rpc.error', { method, code: j.error.code, message: j.error.message, duration_ms: dur });
       throw new RpcError(`RPC ${method}: ${j.error.message}`, res.status, j.error.code);
     }
     logger?.debug('rpc.ok', { method, duration_ms: dur });
     return j.result as T;
+  }
+
+  // Retry wrapper: backs off on 429 / -32429 (rate-limit) with exponential
+  // delay (500ms, 1.5s, 4s) up to 3 retries, then gives up. Other errors
+  // pass through unretried — fail fast on bad request shapes etc.
+  async function call<T>(method: string, params: unknown[]): Promise<T> {
+    const delays = [500, 1500, 4000];
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= delays.length; attempt++) {
+      try {
+        return await singleCall<T>(method, params);
+      } catch (e) {
+        lastError = e;
+        const isRateLimit =
+          e instanceof RpcError && (e.httpStatus === 429 || e.rpcCode === -32429);
+        if (!isRateLimit || attempt === delays.length) throw e;
+        const wait = delays[attempt];
+        logger?.warn('rpc.retry', { method, attempt: attempt + 1, wait_ms: wait });
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+    throw lastError;
   }
 
   return {
