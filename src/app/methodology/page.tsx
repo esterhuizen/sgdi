@@ -107,6 +107,56 @@ export default function MethodologyPage() {
 
       <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
+          Why three dimensions?
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          The obvious objection: country and city are correlated. If you know
+          a validator is in Frankfurt, you know it&apos;s in Germany. So
+          isn&apos;t the country dimension redundant once city is in the
+          formula?
+        </p>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          Correlated, yes. Redundant, no. Consider a pool with five
+          validators in LA, San Francisco, NYC, Chicago, and Dallas — five
+          different US cities on five different ASNs. On a city-and-ASN-only
+          composite that pool looks well-decentralised. With the country
+          dimension included, the same pool scores poorly on country
+          (effectively one bucket: <code>US</code>), and the geometric mean
+          drags the composite down. That&apos;s the right answer:
+          single-jurisdiction concentration is a real risk class, distinct
+          from physical-location and network-operator risk.
+        </p>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          The three failure modes are independent:
+        </p>
+        <ul className="mt-2 ml-6 list-disc space-y-1 text-sm leading-relaxed text-ink-muted">
+          <li>
+            <strong className="text-ink">Country</strong> — regulatory action,
+            sanctions, jurisdiction-specific rule changes (e.g. China&apos;s 2021
+            crypto crackdown took ~50% of Bitcoin hashrate offline overnight).
+          </li>
+          <li>
+            <strong className="text-ink">City</strong> — power outage,
+            datacenter incident, regional fiber cut, weather event.
+          </li>
+          <li>
+            <strong className="text-ink">ASN</strong> — cloud-provider outage,
+            BGP misconfiguration, network-operator-level disruption.
+          </li>
+        </ul>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          Geometric mean weights the three equally — no domain-expert opinion
+          baked in about which risk class is most important. A pool concentrated
+          on any single dimension gets pulled down by the geometric mean
+          regardless of how diverse it looks on the other two. This is the
+          intended behaviour: you don&apos;t want a pool with all stake on AWS
+          (single-ASN failure mode) to claim a high score because its cities
+          and countries are diverse.
+        </p>
+      </section>
+
+      <section className="mt-12">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
           Network baseline — how to read it
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
