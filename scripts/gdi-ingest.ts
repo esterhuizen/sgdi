@@ -136,6 +136,12 @@ async function main() {
   let processed = 0;
   let failed = 0;
   const successfulPools: string[] = [];
+  // The on-chain pool.total_lamports value includes delegated stake + reserve
+  // + transient. We use the SUM of validator-delegated stake for SCORING (only
+  // delegated stake has a geographic position), but DISPLAY the on-chain total
+  // since that's what users see on Solana Compass / Phantom / explorers.
+  // Map captured here in step 3, used in step 7 when upserting pool_scores.
+  const poolOnChainTotal = new Map<string, bigint>();
 
   // 3. Per-pool snapshot.
   for (const poolAddress of pools) {
@@ -159,12 +165,13 @@ async function main() {
           captured_at: startedAt,
         })),
       );
+      poolOnChainTotal.set(poolAddress, d.totalLamports);
       log.info('pool.snapshot.captured', {
         pool: poolAddress,
         program: d.poolProgram,
         validators: d.delegations.length,
         zero_stake_skipped: d.zeroStakeCount,
-        total_sol: Number(d.totalLamports) / 1e9,
+        total_sol_onchain: Number(d.totalLamports) / 1e9,
       });
       processed++;
       successfulPools.push(poolAddress);
@@ -275,6 +282,10 @@ async function main() {
           });
         }
         const result = computePoolScores(rows, meta, networkShares);
+        // Display on-chain total (matches Solana Compass etc.). The pure
+        // scoring function uses the sum-of-validators figure for weighting
+        // — that's correct for the score; only the displayed total differs.
+        const displayTotal = poolOnChainTotal.get(poolAddress) ?? result.totalStakeLamports;
         storage.upsertPoolScore({
           epoch,
           pool_address: poolAddress,
@@ -285,7 +296,7 @@ async function main() {
           network_impact_score: Number.isNaN(result.nis) ? null : result.nis,
           placement_coverage: result.placementCoverage,
           validator_count: result.validatorCount,
-          total_stake_lamports: result.totalStakeLamports,
+          total_stake_lamports: displayTotal,
           computed_at: nowSeconds(),
           methodology_version: METHODOLOGY_VERSION,
         });
