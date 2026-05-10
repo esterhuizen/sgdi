@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     type: 'website',
   },
   twitter: {
-    card: 'summary',
+    card: 'summary_large_image',
     title: 'SGDI — Solana Geographic Decentralisation Index',
     description: 'Open leaderboard of Solana stake pools by geographic decentralisation.',
   },
