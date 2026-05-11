@@ -360,7 +360,16 @@ export default function MethodologyPage() {
           Disclosure
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
-          The maintainer of this index (
+          The maintainer of this index — Tielman (
+          <a
+            href="https://x.com/tielmane"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-ring underline-offset-2 hover:text-ink"
+          >
+            @tielmane
+          </a>{' '}
+          on X,{' '}
           <a
             href="https://t.me/realtielman"
             target="_blank"
@@ -368,8 +377,8 @@ export default function MethodologyPage() {
             className="underline decoration-ring underline-offset-2 hover:text-ink"
           >
             @realtielman
-          </a>
-          ) also operates the{' '}
+          </a>{' '}
+          on Telegram) — also operates the{' '}
           <a
             href="https://definity.finance"
             target="_blank"

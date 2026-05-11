@@ -26,7 +26,7 @@ A **network baseline GDI** — the same formula applied to the entire active val
 
 Stake concentration is a real risk to Solana — both at the validator and at the pool level. Most LST products compete on yield. This index exposes a different dimension: where, geographically and topologically, does each pool's stake actually live?
 
-The methodology is named neutrally so it can credibly outlive any one publisher. It is initially built and maintained by [@realtielman](https://t.me/realtielman), with the explicit intent of handing stewardship to a neutral party (e.g. Stakewiz, Solana Compass, or the Solana Foundation) once the project has a track record. Repository is public, methodology is open, scores are reproducible — anyone can audit, fork, or run their own.
+The methodology is named neutrally so it can credibly outlive any one publisher. It is initially built and maintained by Tielman ([@tielmane](https://x.com/tielmane) on X, [@realtielman](https://t.me/realtielman) on Telegram), with the explicit intent of handing stewardship to a neutral party (e.g. Stakewiz, Solana Compass, or the Solana Foundation) once the project has a track record. Repository is public, methodology is open, scores are reproducible — anyone can audit, fork, or run their own.
 
 **Disclosure:** the maintainer also operates the [Definity](https://definity.finance) stake pool, which appears in this leaderboard. Scoring is mechanical and reproducible from public data — anyone can recompute a pool's GDI from the published methodology and raw inputs. The maintainer cannot privilege any one pool without that privilege being visible in the code and the published JSON.
 
@@ -126,4 +126,4 @@ Apache-2.0. See [LICENSE](./LICENSE).
 
 ---
 
-Built and maintained by [@realtielman](https://t.me/realtielman). The methodology is named neutrally and the codebase is structured for handoff to a neutral steward (Stakewiz, Solana Compass, the Solana Foundation, or similar). Disclosure: the maintainer also operates the [Definity](https://definity.finance) stake pool, which appears in the leaderboard — see the README's "Why it exists" section for the full disclosure.
+Built and maintained by Tielman ([@tielmane](https://x.com/tielmane) on X, [@realtielman](https://t.me/realtielman) on Telegram). The methodology is named neutrally and the codebase is structured for handoff to a neutral steward (Stakewiz, Solana Compass, the Solana Foundation, or similar). Disclosure: the maintainer also operates the [Definity](https://definity.finance) stake pool, which appears in the leaderboard — see the README's "Why it exists" section for the full disclosure.

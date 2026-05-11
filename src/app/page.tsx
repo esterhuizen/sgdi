@@ -221,7 +221,16 @@ export default async function HomePage() {
         <footer className="mt-24 border-t border-ring pt-8 text-xs text-ink-dim">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
-              Built and maintained by{' '}
+              Built and maintained by Tielman (
+              <a
+                href="https://x.com/tielmane"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
+              >
+                @tielmane
+              </a>{' '}
+              on X,{' '}
               <a
                 href="https://t.me/realtielman"
                 target="_blank"
@@ -229,8 +238,8 @@ export default async function HomePage() {
                 className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
               >
                 @realtielman
-              </a>
-              . Methodology open and reproducible from public data — Apache-2.0 licensed.
+              </a>{' '}
+              on Telegram). Methodology open and reproducible from public data — Apache-2.0 licensed.
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               <Link href="/methodology" className="hover:text-ink">
