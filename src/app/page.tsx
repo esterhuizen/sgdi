@@ -1,10 +1,9 @@
 import Link from 'next/link';
-import type { ReactNode } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { GdiLink } from '@/components/GdiLink';
 import { Leaderboard } from '@/components/Leaderboard';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { loadLeaderboard } from '@/lib/data';
+import { loadLeaderboard, loadValidatorIndex, type ValidatorIndexEntry } from '@/lib/data';
 
 // Re-render at most every 60 seconds. Underlying JSON updates per ingest
 // (every 30 min default), so 60s page revalidate is plenty fresh.
@@ -38,17 +37,49 @@ function freshnessAgo(iso: string | undefined): string {
   return new Date(iso).toISOString().slice(0, 10);
 }
 
+// Aggregate the validator index to find the single largest bucket on a
+// dimension (ASN / country / city). Returns the key, its SOL total, and
+// its share of total active stake. Used to render the "concentration
+// headlines" strip on the landing page — the live numbers that frame
+// why the index exists.
+function topConcentrationBucket(
+  validators: readonly ValidatorIndexEntry[],
+  totalActiveStakeSol: number,
+  getter: (v: ValidatorIndexEntry) => string | null,
+): { key: string; sol: number; share: number } | null {
+  const totals = new Map<string, number>();
+  for (const v of validators) {
+    const k = getter(v);
+    if (!k) continue;
+    totals.set(k, (totals.get(k) ?? 0) + v.activated_stake_sol);
+  }
+  if (totals.size === 0 || totalActiveStakeSol <= 0) return null;
+  let best: { key: string; sol: number } | null = null;
+  for (const [k, s] of totals) {
+    if (!best || s > best.sol) best = { key: k, sol: s };
+  }
+  return best && { ...best, share: best.sol / totalActiveStakeSol };
+}
+
 export default async function HomePage() {
-  const data = await loadLeaderboard();
+  const [data, validatorIndex] = await Promise.all([
+    loadLeaderboard(),
+    loadValidatorIndex(),
+  ]);
   const sortedPools =
     data?.pools
       ?.slice()
       .sort((a, b) => (b.gdi ?? -Infinity) - (a.gdi ?? -Infinity)) ?? [];
-  const topPool = sortedPools[0] ?? null;
-  const totalTrackedStake = sortedPools.reduce(
-    (sum, p) => sum + (p.total_stake_sol ?? 0),
-    0,
-  );
+
+  const concentrationByASN = validatorIndex
+    ? topConcentrationBucket(validatorIndex.validators, validatorIndex.total_active_stake_sol, (v) => v.asn)
+    : null;
+  const concentrationByCountry = validatorIndex
+    ? topConcentrationBucket(validatorIndex.validators, validatorIndex.total_active_stake_sol, (v) => v.country)
+    : null;
+  const concentrationByCity = validatorIndex
+    ? topConcentrationBucket(validatorIndex.validators, validatorIndex.total_active_stake_sol, (v) => v.city)
+    : null;
 
   return (
     <main className="min-h-screen">
@@ -127,31 +158,37 @@ export default async function HomePage() {
           </div>
         </header>
 
-        {/* STAT STRIP — three secondary facts, mono-numeric */}
-        {data && (
+        {/* CONCENTRATION HEADLINES — the live "why" of the index. Replaces
+            the old "Top pool / Tracked / Epoch" cards, all of which were
+            already implicit in the leaderboard or the top strip. */}
+        {validatorIndex && (concentrationByASN || concentrationByCountry || concentrationByCity) && (
           <section
-            aria-label="Leaderboard at a glance"
-            className="mt-12 grid gap-3 sm:grid-cols-3"
+            aria-label="Network concentration headlines"
+            className="mt-12"
           >
-            <StatCard
-              label="Top pool"
-              value={topPool?.pool_name || (topPool ? fmt.truncAddr(topPool.pool_address) : '—')}
-              sub={topPool ? <><GdiLink /> <span className="num">{fmt.num(topPool.gdi, 2)}</span></> : ''}
-              isNumeric={false}
-            />
-            <StatCard
-              label="Tracked"
-              value={`${sortedPools.length}`}
-              valueSuffix={sortedPools.length === 1 ? ' pool' : ' pools'}
-              sub={totalTrackedStake > 0 ? `${fmt.sol(totalTrackedStake)} SOL combined` : ''}
-              isNumeric={true}
-            />
-            <StatCard
-              label="Solana epoch"
-              value={String(data.epoch)}
-              sub={`published ${new Date(data.last_published_at).toUTCString().replace(/^\w+, /, '').replace(' GMT', ' UTC')}`}
-              isNumeric={true}
-            />
+            <p className="mb-4 text-xs font-medium uppercase tracking-[0.14em] text-ink-dim">
+              The problem in three numbers · largest single bucket per dimension, today
+            </p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <ConcentrationCard
+                label="Most-concentrated ASN"
+                share={concentrationByASN?.share}
+                bucket={concentrationByASN?.key}
+                sol={concentrationByASN?.sol}
+              />
+              <ConcentrationCard
+                label="Most-concentrated country"
+                share={concentrationByCountry?.share}
+                bucket={concentrationByCountry?.key}
+                sol={concentrationByCountry?.sol}
+              />
+              <ConcentrationCard
+                label="Most-concentrated city"
+                share={concentrationByCity?.share}
+                bucket={concentrationByCity?.key}
+                sol={concentrationByCity?.sol}
+              />
+            </div>
           </section>
         )}
 
@@ -252,35 +289,45 @@ export default async function HomePage() {
   );
 }
 
-function StatCard({
+function ConcentrationCard({
   label,
-  value,
-  valueSuffix,
-  sub,
-  isNumeric,
+  share,
+  bucket,
+  sol,
 }: {
   label: string;
-  value: string;
-  valueSuffix?: string;
-  sub?: ReactNode;
-  isNumeric: boolean;
+  share: number | undefined;
+  bucket: string | undefined;
+  sol: number | undefined;
 }) {
+  const pct = share != null ? (share * 100).toFixed(1) : '—';
+  const solFmt =
+    sol == null
+      ? '—'
+      : sol >= 1_000_000
+        ? `${(sol / 1_000_000).toFixed(0)}M`
+        : sol >= 10_000
+          ? `${(sol / 1_000).toFixed(0)}k`
+          : sol.toFixed(0);
   return (
     <div className="surface p-5">
       <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-ink-dim">
         {label}
       </div>
-      <div
-        className={`mt-2.5 text-3xl font-bold text-ink ${
-          isNumeric ? 'num' : 'font-display tracking-tight2'
-        }`}
-      >
-        {value}
-        {valueSuffix && (
-          <span className="ml-1 text-base font-normal text-ink-dim">{valueSuffix}</span>
+      <div className="num mt-2.5 text-3xl font-bold text-ink">
+        {pct}
+        <span className="ml-0.5 text-2xl font-bold text-ink">%</span>
+      </div>
+      <div className="mt-1.5 text-xs text-ink-muted">
+        {bucket ?? '—'}
+        {sol != null && (
+          <>
+            {' '}
+            <span className="text-ink-dim">·</span>{' '}
+            <span className="num text-ink-dim">{solFmt} SOL</span>
+          </>
         )}
       </div>
-      {sub && <div className="mt-1.5 text-xs text-ink-dim">{sub}</div>}
     </div>
   );
 }
