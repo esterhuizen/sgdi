@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  gdindex.app favicon.
+
+  Design intent:
+    - Dark rounded square (matches site's ink colour #0d1014) so the icon
+      reads as a "badge" against any browser tab background, light or dark.
+    - 2-pixel Solana brand gradient at the top edge — the one visual cue
+      that this is a Solana property. Restrained per the site's "minimal
+      Solana accent" palette decision.
+    - Bold monospace "G" centred — same typographic register as the
+      leaderboard's GDI score column (JetBrains Mono).
+    - Designed to render at 16×16 (browser tab), 32×32 (bookmark bar),
+      and 192×192+ (Android home screen). At 16×16 the stripe collapses
+      to ~1px and the "G" stays crisp.
+-->
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="solana" x1="0" y1="0" x2="32" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14F195" />
+      <stop offset="1" stop-color="#9945FF" />
+    </linearGradient>
+  </defs>
+
+  <!-- Badge background -->
+  <rect width="32" height="32" rx="6" fill="#0d1014" />
+
+  <!-- Solana gradient stripe (top edge) -->
+  <rect x="0" y="0" width="32" height="2.5" fill="url(#solana)" />
+
+  <!-- "G" letterform -->
+  <text
+    x="16" y="24"
+    text-anchor="middle"
+    font-family="ui-monospace, SFMono-Regular, Menlo, 'JetBrains Mono', monospace"
+    font-size="22"
+    font-weight="700"
+    fill="#e6edf3"
+    letter-spacing="-0.02em"
+  >G</text>
+</svg>
