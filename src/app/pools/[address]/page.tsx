@@ -155,7 +155,15 @@ export default async function PoolDetailPage({ params }: Props) {
             <tbody>
               {validatorsSorted.map((v) => (
                 <tr key={v.pubkey} className="border-t border-ring">
-                  <td className="py-3 pl-5 pr-3 font-mono text-xs text-ink-muted">{fmt.addr(v.pubkey)}</td>
+                  <td className="py-3 pl-5 pr-3 font-mono text-xs">
+                    <Link
+                      href={`/validator/${v.pubkey}`}
+                      className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
+                      title="View this validator's decentralisation profile"
+                    >
+                      {fmt.addr(v.pubkey)}
+                    </Link>
+                  </td>
                   <td className="py-3 pr-3 text-ink">{v.country || <span className="text-ink-dim">—</span>}</td>
                   <td className="py-3 pr-3 text-ink">{v.city || <span className="text-ink-dim">—</span>}</td>
                   <td className="py-3 pr-3 text-ink">

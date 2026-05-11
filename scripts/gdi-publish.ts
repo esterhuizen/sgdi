@@ -252,12 +252,153 @@ async function main() {
     validators: allValidators.map(formatValidator),
   });
 
+  // 5b. validator-index.json — ranked index of ACTIVE voting validators
+  //     (not delinquent AND activated_stake > 0). Powers the per-validator
+  //     lookup page on the site. Includes per-dimension rarity + composite +
+  //     network share + rank/percentile against the active denominator.
+  //
+  //     Note: rarities here are computed from network shares over the SAME
+  //     "active voting" set, not the broader stake>0 set used by the pool
+  //     baseline calc. The two diverge by ~1100 dead validators; the active-
+  //     set rarities are slightly higher (smaller denominator → smaller bucket
+  //     shares → higher -ln). For pool scoring we still use the wider set
+  //     under gdi-1.0.0 — tightening that is a separate methodology bump.
+  type ActiveRow = {
+    vote_pubkey: string;
+    identity_pubkey: string | null;
+    identity_name: string | null;
+    image_url: string | null;
+    country: string | null;
+    city: string | null;
+    asn: string | null;
+    asn_name: string | null;
+    activated_stake_sol: number;
+    network_share_country: number | null;
+    network_share_city: number | null;
+    network_share_asn: number | null;
+    rarity_country: number | null;
+    rarity_city: number | null;
+    rarity_asn: number | null;
+    composite_rarity: number | null;
+  };
+
+  const RARITY_FLOOR = 1e-9;
+  const rarity = (share: number | null) =>
+    share == null || share <= 0 ? -Math.log(RARITY_FLOOR) : -Math.log(share);
+
+  const activeRows: ActiveRow[] = [];
+  const activeByBucket = {
+    country: new Map<string, number>(), // bucket -> sum of stake (SOL)
+    city: new Map<string, number>(),
+    asn: new Map<string, number>(),
+  };
+  let totalActiveStakeSol = 0;
+
+  for (const v of allValidators) {
+    // ACTIVE definition: not delinquent AND has stake. Mirrors what
+    // operators / wallets / explorers commonly call "actively voting".
+    if (v.delinquent === 1) continue;
+    if (v.activated_stake_lamports == null || v.activated_stake_lamports <= 0) continue;
+    const stakeSol = Number(v.activated_stake_lamports) / 1e9;
+    totalActiveStakeSol += stakeSol;
+    if (v.country) activeByBucket.country.set(v.country, (activeByBucket.country.get(v.country) ?? 0) + stakeSol);
+    if (v.city)    activeByBucket.city.set(v.city,       (activeByBucket.city.get(v.city)       ?? 0) + stakeSol);
+    if (v.asn)     activeByBucket.asn.set(v.asn,         (activeByBucket.asn.get(v.asn)         ?? 0) + stakeSol);
+    activeRows.push({
+      vote_pubkey: v.validator_pubkey,
+      identity_pubkey: v.identity_pubkey,
+      identity_name: v.identity_name,
+      image_url: v.image_url,
+      country: v.country,
+      city: v.city,
+      asn: v.asn,
+      asn_name: v.asn_name,
+      activated_stake_sol: stakeSol,
+      network_share_country: null,
+      network_share_city: null,
+      network_share_asn: null,
+      rarity_country: null,
+      rarity_city: null,
+      rarity_asn: null,
+      composite_rarity: null,
+    });
+  }
+
+  // Fill in shares + rarities now that totals are known
+  for (const row of activeRows) {
+    if (row.country && totalActiveStakeSol > 0) {
+      const s = (activeByBucket.country.get(row.country) ?? 0) / totalActiveStakeSol;
+      row.network_share_country = s;
+      row.rarity_country = rarity(s);
+    }
+    if (row.city && totalActiveStakeSol > 0) {
+      const s = (activeByBucket.city.get(row.city) ?? 0) / totalActiveStakeSol;
+      row.network_share_city = s;
+      row.rarity_city = rarity(s);
+    }
+    if (row.asn && totalActiveStakeSol > 0) {
+      const s = (activeByBucket.asn.get(row.asn) ?? 0) / totalActiveStakeSol;
+      row.network_share_asn = s;
+      row.rarity_asn = rarity(s);
+    }
+    // Composite = geometric mean (matches GDI's formula at pool level).
+    if (
+      row.rarity_country != null && row.rarity_country > 0 &&
+      row.rarity_city    != null && row.rarity_city    > 0 &&
+      row.rarity_asn     != null && row.rarity_asn     > 0
+    ) {
+      row.composite_rarity = Math.cbrt(row.rarity_country * row.rarity_city * row.rarity_asn);
+    }
+  }
+
+  // Rank by composite rarity desc. Validators with incomplete geo land at the
+  // bottom — surfaced separately so the page can flag them.
+  const rankable = activeRows.filter((r) => r.composite_rarity != null);
+  rankable.sort((a, b) => (b.composite_rarity ?? 0) - (a.composite_rarity ?? 0));
+  const rankByVote = new Map<string, number>();
+  rankable.forEach((r, i) => rankByVote.set(r.vote_pubkey, i + 1));
+
+  const medianRarity = rankable.length > 0
+    ? rankable[Math.floor(rankable.length / 2)].composite_rarity!
+    : null;
+
+  // Build the index payload — pre-sorted by rank ascending (rarest first),
+  // unranked validators at the end. Clients can show the list verbatim or
+  // build a vote-pubkey / identity-pubkey lookup map.
+  const indexed = activeRows
+    .map((r) => ({
+      ...r,
+      rank: rankByVote.get(r.vote_pubkey) ?? null,
+      percentile: rankByVote.get(r.vote_pubkey) != null
+        ? +((rankByVote.get(r.vote_pubkey)! / rankable.length) * 100).toFixed(2)
+        : null,
+    }))
+    .sort((a, b) => {
+      // Ranked first (ascending rank = rarest first); unranked last.
+      if (a.rank == null && b.rank == null) return 0;
+      if (a.rank == null) return 1;
+      if (b.rank == null) return -1;
+      return a.rank - b.rank;
+    });
+
+  await atomicWriteJson(join(OUTPUT_DIR, 'validator-index.json'), {
+    last_published_at: new Date().toISOString(),
+    epoch: latestEpoch,
+    methodology_version: METHODOLOGY_VERSION,
+    active_set_definition: "Stakewiz: !delinquent AND activated_stake > 0",
+    active_count: activeRows.length,
+    rankable_count: rankable.length,
+    total_active_stake_sol: totalActiveStakeSol,
+    median_composite_rarity: medianRarity,
+    validators: indexed,
+  });
+
   // 6. concentration-crosscheck.json — our computed shares vs Stakewiz's reported
   //    For each city/ASN bucket, we have:
-  //      - sgdi_share: computed by summing validator stakes ourselves
+  //      - gdi_share: computed by summing validator stakes ourselves
   //      - stakewiz_reported: avg of stakewiz_*_concentration across validators in that bucket
   //    Wide divergence between the two would surface here for review.
-  type BucketAgg = { sgdi_share: number; stakewiz_reported: number | null; sample_n: number };
+  type BucketAgg = { gdi_share: number; stakewiz_reported: number | null; sample_n: number };
   const computeBucketShares = (
     getter: (v: ValidatorRow) => string | null,
     getStakewizReported: (v: ValidatorRow) => number | null,
@@ -267,7 +408,7 @@ async function main() {
     // we have on file is too narrow — we want network-wide shares; use Stakewiz's
     // activated_stake via the validators table only if we'd loaded it that way.
     // For this cross-check we use validator counts as a proxy for the per-bucket
-    // signal, since the sgdi-side computation already lives inside ingest.ts —
+    // signal, since the GDI-side computation already lives inside ingest.ts —
     // here we just expose Stakewiz's per-validator reported value averaged per
     // bucket, which is the straight comparison value.
     const stakewizSums = new Map<string, { sum: number; n: number }>();
@@ -286,7 +427,7 @@ async function main() {
     const out = new Map<string, BucketAgg>();
     for (const [k, agg] of stakewizSums) {
       out.set(k, {
-        sgdi_share: 0,  // filled below from baseline data — the network-wide share is what we computed at ingest
+        gdi_share: 0,  // filled below from baseline data — the network-wide share is what we computed at ingest
         stakewiz_reported: agg.n > 0 ? agg.sum / agg.n : null,
         sample_n: agg.n,
       });
@@ -316,7 +457,7 @@ async function main() {
     last_published_at: new Date().toISOString(),
     note:
       'Stakewiz publishes per-validator city_concentration and asn_concentration. ' +
-      'SGDI computes its own bucket shares from raw activated_stake; Stakewiz\'s ' +
+      'The GDI computes its own bucket shares from raw activated_stake; Stakewiz\'s ' +
       'reported values are surfaced here for sanity. Wide divergence between the ' +
       'two would be a red flag.',
     cities_top: topN(cityAgg, 25),

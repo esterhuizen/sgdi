@@ -1,0 +1,61 @@
+name: Pool inclusion request
+description: Request that a Solana stake pool be added to the leaderboard.
+title: "[POOL] "
+labels:
+  - pool-request
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for wanting to be measured.
+
+        Inclusion is mechanical. Once accepted, the pool is scored every Solana epoch from public on-chain data + Stakewiz / Validators.app metadata — no manual adjustments, no boosts on request, nothing private is consulted. The formula is in [the methodology page](https://gdindex.app/methodology) and the code is open source.
+
+        Fill the fields below and I'll respond on the same issue. Typical turnaround is a few days.
+  - type: input
+    id: pool_address
+    attributes:
+      label: Pool address (mainnet)
+      description: The SPL stake-pool program account address.
+      placeholder: "Bvbu55B991evqqhLtKcyTZjzQ4EQzRUwtf9T4CcpMmPL"
+    validations:
+      required: true
+  - type: input
+    id: pool_name
+    attributes:
+      label: Pool display name
+      description: How the pool should appear in the leaderboard (ticker-style works well — short, recognisable).
+      placeholder: "MyPoolSOL"
+    validations:
+      required: true
+  - type: input
+    id: token_mint
+    attributes:
+      label: LST token mint (if applicable)
+      description: Leave blank for non-LST pools.
+      placeholder: "Token mint address"
+    validations:
+      required: false
+  - type: input
+    id: contact
+    attributes:
+      label: Contact (Telegram, X, or email)
+      description: For any clarifying questions before inclusion.
+    validations:
+      required: true
+  - type: textarea
+    id: focus
+    attributes:
+      label: Pool strategy (optional)
+      description: A sentence or two on what makes this pool's delegation strategy distinct — geographic focus, validator vetting policy, mission, etc.
+    validations:
+      required: false
+  - type: checkboxes
+    id: acknowledgement
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: I understand scoring is mechanical — no edits or boosts on request.
+          required: true
+        - label: I understand the pool's stake composition is read directly from on chain; no private inputs are accepted.
+          required: true

@@ -1,13 +1,12 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import { METHODOLOGY_VERSION } from '@/lib/gdi/scoring';
 
 export const metadata: Metadata = {
   title: 'Methodology',
   description:
-    'Formula, data sources, limitations, and version history for the Solana Geographic Decentralisation Index.',
+    'Formula, data sources, limitations, and version history for the Geographic Decentralisation Index (GDI) used to rank Solana stake pools.',
 };
-
-const METHODOLOGY_VERSION = 'sgdi-1.0.0';
 
 export default function MethodologyPage() {
   return (
@@ -19,7 +18,7 @@ export default function MethodologyPage() {
       <header className="mt-8 max-w-3xl">
         <span className="pill">Methodology · {METHODOLOGY_VERSION}</span>
         <h1 className="mt-5 text-3xl font-semibold tracking-tight text-ink md:text-4xl">
-          How SGDI is computed
+          How the GDI is computed
         </h1>
         <p className="mt-4 text-base leading-relaxed text-ink-muted">
           The score is reproducible from on-chain data and a small set of public
@@ -216,7 +215,7 @@ export default function MethodologyPage() {
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
           Stakewiz publishes its own per-validator{' '}
           <code>city_concentration</code> and <code>asn_concentration</code> fields.
-          SGDI does <strong className="text-ink">not</strong> use these directly
+          The GDI does <strong className="text-ink">not</strong> use these directly
           for scoring — instead, we compute network shares ourselves from the
           raw <code>activated_stake</code> + IP fields, so the math is fully
           reproducible from public inputs and we cover all three dimensions
@@ -302,6 +301,41 @@ export default function MethodologyPage() {
             CONTRIBUTING.md
           </a>{' '}
           for the bump policy.
+        </p>
+      </section>
+
+      <section className="mt-12">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
+          Disclosure
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          The maintainer of this index (
+          <a
+            href="https://t.me/realtielman"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-ring underline-offset-2 hover:text-ink"
+          >
+            @realtielman
+          </a>
+          ) also operates the{' '}
+          <a
+            href="https://definity.finance"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-ring underline-offset-2 hover:text-ink"
+          >
+            Definity
+          </a>{' '}
+          stake pool, which appears in this leaderboard. Scoring is mechanical
+          and reproducible from public data — there is no manual adjustment.
+          Any pool&apos;s GDI can be recomputed from this page&apos;s
+          formula plus the raw inputs published at{' '}
+          <code className="rounded bg-bg-muted px-1.5 py-0.5">/gdi/*.json</code>.
+          The maintainer cannot privilege any one pool without that privilege
+          being visible in the code and the published JSON. The eventual aim
+          is handoff to a fully neutral steward (Stakewiz, Solana Compass, or
+          the Solana Foundation) once the project has a track record.
         </p>
       </section>
     </main>

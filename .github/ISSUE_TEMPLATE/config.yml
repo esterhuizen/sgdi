@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Direct message to the maintainer
+    url: https://t.me/realtielman
+    about: |
+      For private or time-sensitive questions, DM @realtielman on Telegram.
+      For anything that could benefit other readers (data, methodology, site),
+      please use the public issue templates above instead.

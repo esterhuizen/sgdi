@@ -82,6 +82,13 @@ export default async function HomePage() {
                   Helius / Stakewiz / Validators.app / Jupiter
                 </a>
               </span>
+              <Separator />
+              <Link
+                href="/validator"
+                className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
+              >
+                Validator lookup →
+              </Link>
             </div>
           ) : (
             <div className="text-ink-dim">First leaderboard arriving at next epoch boundary.</div>
@@ -196,6 +203,18 @@ export default async function HomePage() {
               </p>
             </div>
           )}
+
+          <p className="mt-4 text-xs text-ink-dim">
+            Pool operator — want your pool listed?{' '}
+            <a
+              href="https://github.com/esterhuizen/sgdi/issues/new?template=pool-inclusion.yml"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
+            >
+              Submit it for inclusion →
+            </a>
+          </p>
         </section>
 
         {/* FOOTER */}
@@ -204,16 +223,16 @@ export default async function HomePage() {
             <div>
               Built and maintained by{' '}
               <a
-                href="https://definity.finance"
+                href="https://t.me/realtielman"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
               >
-                Definity
+                @realtielman
               </a>
               . Methodology open and reproducible from public data — Apache-2.0 licensed.
             </div>
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
               <Link href="/methodology" className="hover:text-ink">
                 Methodology
               </Link>
@@ -224,6 +243,14 @@ export default async function HomePage() {
                 className="hover:text-ink"
               >
                 GitHub
+              </a>
+              <a
+                href="https://github.com/esterhuizen/sgdi/issues/new/choose"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-ink"
+              >
+                Contact / report an issue
               </a>
             </div>
           </div>

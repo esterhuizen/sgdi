@@ -1,0 +1,35 @@
+name: Bug / methodology issue
+description: Report a bug, a score discrepancy, or a methodology concern.
+title: "[ISSUE] "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type
+      options:
+        - "Data quality (wrong number, missing pool, stale data)"
+        - "Methodology concern (formula, edge case, missing dimension)"
+        - "Site bug (display, navigation, accessibility)"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What did you find?
+      description: |
+        As much detail as you can — what you saw, what you expected, where (URL or pool address), and at what epoch.
+
+        For score discrepancies: please include the raw numbers you're comparing against. The score for any pool is reproducible from the methodology page + the raw JSON at `/gdi/*.json`.
+    validations:
+      required: true
+  - type: input
+    id: contact
+    attributes:
+      label: Contact (optional)
+      description: For follow-up. If left blank I'll respond on the issue thread.
+      placeholder: "TG / X / email"
+    validations:
+      required: false

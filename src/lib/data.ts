@@ -97,6 +97,45 @@ export type NetworkBaselineFile = {
 // Loaders
 // ───────────────────────────────────────────────────────────────────────────
 
+// ───────────────────────────────────────────────────────────────────────────
+// Validator index — used by /validator/* pages
+// ───────────────────────────────────────────────────────────────────────────
+
+export type ValidatorIndexEntry = {
+  vote_pubkey: string;
+  identity_pubkey: string | null;
+  identity_name: string | null;
+  image_url: string | null;
+  country: string | null;
+  city: string | null;
+  asn: string | null;
+  asn_name: string | null;
+  activated_stake_sol: number;
+  network_share_country: number | null;
+  network_share_city: number | null;
+  network_share_asn: number | null;
+  rarity_country: number | null;
+  rarity_city: number | null;
+  rarity_asn: number | null;
+  composite_rarity: number | null;
+  rank: number | null;
+  percentile: number | null;
+};
+
+export type ValidatorIndex = {
+  last_published_at: string;
+  epoch: number;
+  methodology_version: string;
+  active_set_definition: string;
+  active_count: number;
+  rankable_count: number;
+  total_active_stake_sol: number;
+  median_composite_rarity: number | null;
+  validators: ValidatorIndexEntry[];
+};
+
+export const loadValidatorIndex = () => loadJson<ValidatorIndex>('validator-index.json');
+
 export const loadLeaderboard = () => loadJson<Leaderboard>('leaderboard-latest.json');
 export const loadLeaderboardForEpoch = (epoch: number) =>
   loadJson<Leaderboard>(`leaderboard-${epoch}.json`);

@@ -3,7 +3,7 @@
 // This is the soul of SGDI. It must remain side-effect-free, deterministic,
 // and unit-testable without mocks. Stays pure or the design has failed.
 //
-// Methodology (sgdi-1.0.0):
+// Methodology (gdi-1.0.0):
 //
 //   For each validator v in a pool with stake fraction wᵥ:
 //     rarity_D(v) = -ln( network_share_D(category of v) )    D ∈ {country, city, ASN}
@@ -20,7 +20,7 @@
 //   geographic / network positions — directly contributing to network
 //   decentralisation.
 
-export const METHODOLOGY_VERSION = 'sgdi-1.0.0';
+export const METHODOLOGY_VERSION = 'gdi-1.0.0';
 
 /**
  * Lower-bound on a category's network share when computing rarity. Prevents

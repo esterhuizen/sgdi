@@ -29,8 +29,10 @@ type Args = {
   sets: Map<string, number>;     // pubkey → absolute SOL
   deltas: Map<string, number>;   // pubkey → ± SOL
   topN: number;
-  minStake: number;              // per-validator floor in SOL (used only for --optimize)
-  maxStake: number | null;       // per-validator ceiling in SOL (used only for --optimize)
+  minStake: number;              // per-validator floor in SOL
+  maxStake: number | null;       // per-validator ceiling in SOL
+  epochBudget: number | null;    // max SOL transferable in a single epoch
+  maxMove: number | null;        // max DECREASE per validator per epoch (additions uncapped)
   json: boolean;
   help: boolean;
 };
@@ -44,6 +46,8 @@ function parseArgs(argv: string[]): Args {
     topN: 10,
     minStake: 0,
     maxStake: null,
+    epochBudget: null,
+    maxMove: null,
     json: false,
     help: false,
   };
@@ -57,6 +61,8 @@ function parseArgs(argv: string[]): Args {
     else if (a === '--top') args.topN = Number(next());
     else if (a === '--min-stake') args.minStake = Number(next());
     else if (a === '--max-stake') args.maxStake = Number(next());
+    else if (a === '--epoch-budget') args.epochBudget = Number(next());
+    else if (a === '--max-move') args.maxMove = Number(next());
     else if (a === '--json') args.json = true;
     else if (a === '--set' || a === '--delta') {
       const spec = next();
@@ -86,9 +92,18 @@ Options:
   --set <pubkey>=<sol>       Set validator's stake to <sol> SOL (repeatable)
   --delta <pubkey>=<±sol>    Adjust validator's stake by <±sol> SOL (repeatable)
   --optimize                 Find the stake reallocation maximising GDI
-  --top <n>                  Top N moves to print under --optimize (default: 10)
-  --min-stake <sol>          Per-validator floor in --optimize (default: 0)
-  --max-stake <sol>          Per-validator ceiling in --optimize (default: none)
+  --top <n>                  Top N moves/transfers to print (default: 10)
+  --min-stake <sol>          Per-validator floor (default: 0)
+  --max-stake <sol>          Per-validator ceiling (default: none)
+  --epoch-budget <sol>       Single-step mode: max stake transferable in
+                             one epoch. Switches output to "best single
+                             transfer(s) you can do this epoch" instead
+                             of the full optimisation plan.
+  --max-move <sol>           Max stake that can be REMOVED from any single
+                             validator per epoch. Additions are uncapped
+                             (only constrained by --max-stake). Use to
+                             give validators time to migrate before they
+                             lose most of their stake.
   --json                     Emit JSON instead of human-readable text
   -h, --help                 This help
 
@@ -99,8 +114,11 @@ Examples:
   # What-if: shift 5k SOL from validator A to validator B
   npm run scenario -- --delta A=-5000 --delta B=+5000
 
-  # Find the optimal allocation across the current validator set
+  # Find the GLOBAL optimal allocation (no per-epoch limit)
   npm run scenario -- --optimize --top 15
+
+  # Best single transfer this epoch: ≤20k SOL move, per-validator [2k, 30k]
+  npm run scenario -- --epoch-budget 20000 --min-stake 2000 --max-stake 30000
 `);
 }
 
@@ -391,6 +409,164 @@ async function main() {
     if (fullDeleg > 0 && args.minStake === 0) {
       console.log('');
       console.log(`Note: ${fullDeleg} validators recommended for full de-delegation. Pass --min-stake N to set a floor.`);
+    }
+  }
+
+  // Single-epoch PLAN: greedy gradient-driven set of changes that spends the
+  // movement budget on the highest-impact source/sink shifts. The result is
+  // ONE plan (not alternatives) — a list of per-validator net deltas. We
+  // then display the top-N changes from that plan by |Δ|.
+  //
+  // Greedy step: at the current trial allocation, compute ∂log(GDI)/∂w for
+  // every validator. Move stake from the lowest-gradient validator with
+  // headroom (current > floor) to the highest-gradient validator with
+  // headroom (current < ceiling). Update, decrement budget, repeat.
+  // Stops when budget exhausted, no improving pair exists, or the next
+  // move would be below the dust threshold.
+  if (args.epochBudget != null) {
+    const floor = Math.max(0, args.minStake);
+    const ceil = args.maxStake ?? Infinity;
+    const budget = args.epochBudget;
+    const maxMovePerVal = args.maxMove ?? Infinity; // per-validator decrease cap
+    const DUST = 100; // SOL — below this, a stake-pool tx isn't worth submitting
+    const n = placeable.length;
+
+    const trial = currentStake.slice();
+    // Per-validator "still removable" cap: bounded by both the floor and the
+    // user's --max-move (giving each validator a chance to migrate before
+    // losing more than maxMovePerVal of stake this epoch).
+    const removableLeft = currentStake.map((s) =>
+      Math.min(Math.max(0, s - floor), maxMovePerVal),
+    );
+
+    let budgetLeft = budget;
+    let iters = 0;
+    const MAX_ITERS = 200;
+
+    while (budgetLeft > DUST && iters < MAX_ITERS) {
+      iters++;
+      const total = trial.reduce((a, b) => a + b, 0);
+      if (total <= 0) break;
+
+      // DC scores at trial allocation
+      let dcc = 0, dcity = 0, dca = 0;
+      for (let i = 0; i < n; i++) {
+        const w = trial[i] / total;
+        dcc   += w * rarities[i].country;
+        dcity += w * rarities[i].city;
+        dca   += w * rarities[i].asn;
+      }
+      if (dcc <= 0 || dcity <= 0 || dca <= 0) break;
+
+      // Per-validator gradient of log(GDI) wrt w_i.
+      // ("value per SOL" of adding stake to validator i.)
+      let bestSink = -1, bestSinkGrad = -Infinity;
+      let bestSource = -1, bestSourceGrad = Infinity;
+      for (let i = 0; i < n; i++) {
+        const grad = (rarities[i].country / dcc
+                    + rarities[i].city    / dcity
+                    + rarities[i].asn     / dca) / 3;
+        const room_up   = ceil - trial[i];   // can ADD this much (uncapped by --max-move)
+        const room_down = removableLeft[i];  // can REMOVE this much (floor + per-val cap)
+        if (room_up   > DUST && grad > bestSinkGrad)   { bestSinkGrad = grad;   bestSink = i; }
+        if (room_down > DUST && grad < bestSourceGrad) { bestSourceGrad = grad; bestSource = i; }
+      }
+      if (bestSink < 0 || bestSource < 0 || bestSink === bestSource) break;
+      if (bestSinkGrad - bestSourceGrad <= 1e-9) break;
+
+      const sourceCapacity = removableLeft[bestSource];
+      const sinkCapacity   = ceil - trial[bestSink];
+      const amount = Math.min(sourceCapacity, sinkCapacity, budgetLeft);
+      if (amount < DUST) break;
+
+      trial[bestSource]         -= amount;
+      trial[bestSink]           += amount;
+      removableLeft[bestSource] -= amount;
+      budgetLeft                -= amount;
+    }
+
+    const moved = budget - budgetLeft;
+    const newScores = scoreAllocation(trial, rarities);
+
+    // Per-validator gradient at the CURRENT (pre-plan) allocation — used as
+    // a tie-break so the displayed order reflects actual greedy priority:
+    //   adds:    higher gradient first (most valuable destinations first)
+    //   removes: lower gradient first  (most "drainable" first)
+    // When multiple removes hit the same |Δ| under --max-move, this orders
+    // them as the optimiser would have picked them.
+    const startGrad: number[] = (() => {
+      const c = currentScores;
+      if (c.dc_country <= 0 || c.dc_city <= 0 || c.dc_asn <= 0) return rarities.map(() => 0);
+      return rarities.map((r) =>
+        (r.country / c.dc_country + r.city / c.dc_city + r.asn / c.dc_asn) / 3,
+      );
+    })();
+
+    // Collapse into one row per validator with net Δ. Sort:
+    //   1° |Δ| desc — biggest visible moves first
+    //   2° sign-aware gradient priority — among ties, "what would the
+    //      optimiser pick first?"
+    type Change = { idx: number; before: number; after: number; delta: number; grad: number };
+    const changes: Change[] = trial
+      .map((after, idx) => ({
+        idx,
+        before: currentStake[idx],
+        after,
+        delta: after - currentStake[idx],
+        grad: startGrad[idx],
+      }))
+      .filter((c) => Math.abs(c.delta) >= DUST)
+      .sort((a, b) => {
+        const absDiff = Math.abs(b.delta) - Math.abs(a.delta);
+        if (Math.abs(absDiff) > 1e-9) return absDiff;
+        // Tie on |Δ|. Among adds: highest grad first. Among removes: lowest grad first.
+        // Mixed (add vs remove same |Δ|): put adds before removes so the destination is visible first.
+        const aSignKey = a.delta > 0 ? -1e9 - a.grad : a.grad;
+        const bSignKey = b.delta > 0 ? -1e9 - b.grad : b.grad;
+        return aSignKey - bSignKey;
+      });
+
+    const displayChanges = changes.slice(0, Math.max(1, args.topN));
+    const pctDelta = currentScores.gdi > 0
+      ? ((newScores.gdi - currentScores.gdi) / currentScores.gdi) * 100
+      : 0;
+
+    const constraintLine = [
+      `≤${fmtSol(budget)} SOL movement`,
+      `per-validator floor ${fmtSol(floor)} SOL`,
+      `ceiling ${args.maxStake ? fmtSol(args.maxStake) + ' SOL' : 'none'}`,
+      args.maxMove != null ? `max-decrease ${fmtSol(args.maxMove)} SOL/validator` : null,
+    ].filter(Boolean).join(', ');
+    console.log('');
+    console.log(`Single-epoch plan (${constraintLine}):`);
+    console.log(
+      `  ${fmtSol(moved)} SOL of ${fmtSol(budget)} budget used    GDI ${currentScores.gdi.toFixed(3)} → ${newScores.gdi.toFixed(3)}    (${pctDelta >= 0 ? '+' : ''}${pctDelta.toFixed(2)}%)`,
+    );
+
+    if (changes.length === 0) {
+      console.log('  No feasible move under these constraints.');
+    } else {
+      console.log('');
+      console.log(`  Top ${displayChanges.length} of ${changes.length} change${changes.length === 1 ? '' : 's'} (sorted by |Δ stake|):`);
+      console.log('');
+      for (const [rank, c] of displayChanges.entries()) {
+        const r = placeable[c.idx].row;
+        const tag = `${r.country}/${r.city}/${r.asn}`;
+        const dir = c.delta > 0 ? 'TO   ' : 'FROM ';
+        const sign = c.delta > 0 ? '+' : '−';
+        const name = (r.name || truncAddr(r.pubkey)).padEnd(28);
+        console.log(
+          `   #${(rank + 1).toString().padStart(2)}  ${sign}${fmtSol(Math.abs(c.delta)).padStart(6)} SOL  ${dir} ${name}  ${truncAddr(r.pubkey)}  ${tag}`,
+        );
+        console.log(
+          `                              ${fmtSol(c.before).padStart(6)} SOL  →  ${fmtSol(c.after)} SOL`,
+        );
+      }
+      // Sanity: adds should equal removes (stake conserved within pool)
+      const adds = changes.filter((c) => c.delta > 0).reduce((s, c) => s + c.delta, 0);
+      const removes = changes.filter((c) => c.delta < 0).reduce((s, c) => s - c.delta, 0);
+      console.log('');
+      console.log(`  Σ adds = ${fmtSol(adds)} SOL    Σ removes = ${fmtSol(removes)} SOL    (must match — stake is conserved within the pool)`);
     }
   }
 

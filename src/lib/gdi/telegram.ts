@@ -31,11 +31,11 @@ export type TelegramResult =
     };
 
 const TELEGRAM_MAX = 4096;
-const PREFIX = '🟧 [SGDI] ';
+const PREFIX = '🟧 [GDI] ';
 
 /**
  * Send a plain-text message to the configured chat. Best-effort, never throws.
- * Caller passes the raw body; this function prefixes it with [SGDI] so the
+ * Caller passes the raw body; this function prefixes it with [GDI] so the
  * alert is visually distinguishable from definity.finance ops messages.
  */
 export async function sendSgdiAlert(text: string): Promise<TelegramResult> {

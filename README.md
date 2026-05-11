@@ -1,14 +1,16 @@
-# SGDI — Solana Geographic Decentralisation Index
+# Solana Stake Pool Decentralisation Index
 
-A public, per-epoch leaderboard ranking Solana stake pools by **stake-weighted geographic decentralisation**. Live at [sgdi.app](https://sgdi.app).
+A public, per-epoch leaderboard ranking Solana stake pools by **stake-weighted geographic decentralisation**. Live at [gdindex.app](https://gdindex.app).
 
 The metric, the data, and the methodology are open. The numbers are independently reproducible from on-chain data and a small set of public APIs.
+
+The score itself is called the **GDI** (Geographic Decentralisation Index).
 
 ## What it answers
 
 > Which Solana stake pools are actually distributing stake across geographies, ASNs, and cities — and which are concentrating it?
 
-For each pool, every Solana epoch (≈ 2–3 days), SGDI computes:
+For each pool, every Solana epoch (≈ 2–3 days), the index computes:
 
 - **DC_country** — *Decentralisation Contribution* on country: stake-weighted average rarity of the countries the pool delegates to
 - **DC_city** — same on cities
@@ -22,9 +24,11 @@ A **network baseline GDI** — the same formula applied to the entire active val
 
 ## Why it exists
 
-Stake concentration is a real risk to Solana — both at the validator and at the pool level. Most LST products compete on yield. SGDI exposes a different dimension: where, geographically and topologically, does each pool's stake actually live?
+Stake concentration is a real risk to Solana — both at the validator and at the pool level. Most LST products compete on yield. This index exposes a different dimension: where, geographically and topologically, does each pool's stake actually live?
 
-The methodology is named neutrally so it can credibly outlive any one publisher. SGDI is initially built and maintained by [Definity](https://definity.finance), with the explicit intent of handing stewardship to a neutral party (e.g. Stakewiz, Solana Compass, or the Solana Foundation) once the project has a track record. Repository is public, methodology is open, scores are reproducible — anyone can audit, fork, or run their own.
+The methodology is named neutrally so it can credibly outlive any one publisher. It is initially built and maintained by [@realtielman](https://t.me/realtielman), with the explicit intent of handing stewardship to a neutral party (e.g. Stakewiz, Solana Compass, or the Solana Foundation) once the project has a track record. Repository is public, methodology is open, scores are reproducible — anyone can audit, fork, or run their own.
+
+**Disclosure:** the maintainer also operates the [Definity](https://definity.finance) stake pool, which appears in this leaderboard. Scoring is mechanical and reproducible from public data — anyone can recompute a pool's GDI from the published methodology and raw inputs. The maintainer cannot privilege any one pool without that privilege being visible in the code and the published JSON.
 
 ## How to read the leaderboard
 
@@ -50,7 +54,7 @@ NIS          =  Σᵥ wᵥ · stakewiz_wiz_score(v)                 network impa
 
 Geometric mean penalises being good on one dimension and poor on another — distinct decentralisation risk classes (a pool that's geographically diverse but everyone's on AWS still has a single-ASN failure mode).
 
-Full methodology, sources, limitations, and version history at [sgdi.app/methodology](https://sgdi.app/methodology).
+Full methodology, sources, limitations, and version history at [gdindex.app/methodology](https://gdindex.app/methodology).
 
 ## Data sources
 
@@ -122,4 +126,4 @@ Apache-2.0. See [LICENSE](./LICENSE).
 
 ---
 
-Built and maintained by [Definity](https://definity.finance) — a Solana stake pool focused on geographic decentralisation. The methodology is named neutrally and the codebase is structured for handoff to a neutral steward.
+Built and maintained by [@realtielman](https://t.me/realtielman). The methodology is named neutrally and the codebase is structured for handoff to a neutral steward (Stakewiz, Solana Compass, the Solana Foundation, or similar). Disclosure: the maintainer also operates the [Definity](https://definity.finance) stake pool, which appears in the leaderboard — see the README's "Why it exists" section for the full disclosure.

@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS pools (
 
 CREATE TABLE IF NOT EXISTS validators (
   validator_pubkey            TEXT PRIMARY KEY,
+  identity_pubkey             TEXT,
   identity_name               TEXT,
   country                     TEXT,
   city                        TEXT,
@@ -52,8 +53,14 @@ CREATE TABLE IF NOT EXISTS validators (
   stakewiz_wiz_score          REAL,
   stakewiz_city_concentration REAL,
   stakewiz_asn_concentration  REAL,
-  stakewiz_refreshed_at       INTEGER
+  stakewiz_refreshed_at       INTEGER,
+  activated_stake_lamports    INTEGER,
+  delinquent                  INTEGER,
+  image_url                   TEXT
 );
+
+-- Forward-migration: existing installs need these columns added.
+-- SQLite ignores duplicate-column errors via the catch in the migration runner.
 
 CREATE TABLE IF NOT EXISTS pool_snapshots (
   epoch            INTEGER NOT NULL,
@@ -123,6 +130,7 @@ export type Pool = {
 
 export type ValidatorRow = {
   validator_pubkey: string;
+  identity_pubkey: string | null;
   identity_name: string | null;
   country: string | null;
   city: string | null;
@@ -137,6 +145,9 @@ export type ValidatorRow = {
   stakewiz_city_concentration: number | null;
   stakewiz_asn_concentration: number | null;
   stakewiz_refreshed_at: number | null;
+  activated_stake_lamports: number | null;
+  delinquent: number | null;       // 0 / 1; null = unknown
+  image_url: string | null;
 };
 
 export type PoolSnapshot = {
@@ -201,6 +212,23 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
   const db: Db = new Database(dbPath, opts.readonly ? { readonly: true } : {});
   if (!opts.readonly) {
     db.exec(SCHEMA_SQL);
+
+    // Forward migrations for additive columns on the validators table.
+    // SQLite has no IF NOT EXISTS on ALTER TABLE ADD COLUMN, so we catch
+    // the "duplicate column" error on already-migrated installs. Cheap and
+    // idempotent.
+    const addColumn = (table: string, col: string, decl: string) => {
+      try {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
+      } catch (e) {
+        const msg = (e as Error).message || '';
+        if (!/duplicate column name/i.test(msg)) throw e;
+      }
+    };
+    addColumn('validators', 'identity_pubkey',          'TEXT');
+    addColumn('validators', 'activated_stake_lamports', 'INTEGER');
+    addColumn('validators', 'delinquent',               'INTEGER');
+    addColumn('validators', 'image_url',                'TEXT');
   }
 
   const stmt = {
@@ -231,14 +259,17 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
 
     upsertValidator: db.prepare(`
       INSERT INTO validators
-        (validator_pubkey, identity_name, country, city, asn, asn_name, datacenter,
+        (validator_pubkey, identity_pubkey, identity_name, country, city, asn, asn_name, datacenter,
          country_source, city_source, asn_source, metadata_refreshed_at,
-         stakewiz_wiz_score, stakewiz_city_concentration, stakewiz_asn_concentration, stakewiz_refreshed_at)
+         stakewiz_wiz_score, stakewiz_city_concentration, stakewiz_asn_concentration, stakewiz_refreshed_at,
+         activated_stake_lamports, delinquent, image_url)
       VALUES
-        (@validator_pubkey, @identity_name, @country, @city, @asn, @asn_name, @datacenter,
+        (@validator_pubkey, @identity_pubkey, @identity_name, @country, @city, @asn, @asn_name, @datacenter,
          @country_source, @city_source, @asn_source, @metadata_refreshed_at,
-         @stakewiz_wiz_score, @stakewiz_city_concentration, @stakewiz_asn_concentration, @stakewiz_refreshed_at)
+         @stakewiz_wiz_score, @stakewiz_city_concentration, @stakewiz_asn_concentration, @stakewiz_refreshed_at,
+         @activated_stake_lamports, @delinquent, @image_url)
       ON CONFLICT(validator_pubkey) DO UPDATE SET
+        identity_pubkey             = COALESCE(excluded.identity_pubkey,             validators.identity_pubkey),
         identity_name               = COALESCE(excluded.identity_name,               validators.identity_name),
         country                     = COALESCE(excluded.country,                     validators.country),
         city                        = COALESCE(excluded.city,                        validators.city),
@@ -252,7 +283,10 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         stakewiz_wiz_score          = COALESCE(excluded.stakewiz_wiz_score,          validators.stakewiz_wiz_score),
         stakewiz_city_concentration = COALESCE(excluded.stakewiz_city_concentration, validators.stakewiz_city_concentration),
         stakewiz_asn_concentration  = COALESCE(excluded.stakewiz_asn_concentration,  validators.stakewiz_asn_concentration),
-        stakewiz_refreshed_at       = COALESCE(excluded.stakewiz_refreshed_at,       validators.stakewiz_refreshed_at)
+        stakewiz_refreshed_at       = COALESCE(excluded.stakewiz_refreshed_at,       validators.stakewiz_refreshed_at),
+        activated_stake_lamports    = COALESCE(excluded.activated_stake_lamports,    validators.activated_stake_lamports),
+        delinquent                  = COALESCE(excluded.delinquent,                  validators.delinquent),
+        image_url                   = COALESCE(excluded.image_url,                   validators.image_url)
     `),
     getValidator: db.prepare(`SELECT * FROM validators WHERE validator_pubkey = ?`),
     listAllValidators: db.prepare(`SELECT * FROM validators`),

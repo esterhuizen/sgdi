@@ -97,6 +97,7 @@ export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
 
     out.push({
       validator_pubkey: pubkey,
+      identity_pubkey: sw?.identity ?? null,
       identity_name,
       country: country.value,
       city: city.value,
@@ -111,6 +112,13 @@ export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
       stakewiz_city_concentration: sw?.city_concentration ?? null,
       stakewiz_asn_concentration: sw?.asn_concentration ?? null,
       stakewiz_refreshed_at: sw ? now : null,
+      // Network-wide stake & status — needed for the validator-lookup page
+      // (ranks by activated_stake and excludes delinquent from the "active"
+      // denominator).
+      activated_stake_lamports:
+        sw?.activated_stake != null ? Math.floor(sw.activated_stake * 1e9) : null,
+      delinquent: sw?.delinquent != null ? (sw.delinquent ? 1 : 0) : null,
+      image_url: sw?.image ?? null,
     });
   }
 

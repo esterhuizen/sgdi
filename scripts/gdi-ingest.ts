@@ -96,9 +96,32 @@ async function main() {
     slots_in_epoch: epochInfo.slotsInEpoch,
   });
 
-  // 2. Bail if this epoch's already done.
+  // 2. Bail if this epoch's already done — BUT still refresh validator
+  //    metadata. Stakewiz updates delinquent / stake / IP geolocation
+  //    intra-epoch; the per-validator lookup page needs this fresh.
+  //    The pool snapshots / scores / baseline are left untouched (those
+  //    are by-design per-epoch artifacts).
   if (storage.isEpochAlreadyIngested(epoch)) {
     log.info('epoch.skipped', { epoch, reason: 'already_ingested' });
+    try {
+      const swData = await stakewiz.fetchAllValidators();
+      const vaData = await validatorsApp.fetchAllValidators().catch(() => []);
+      const stakewizMap = new Map(swData.map((v) => [v.vote_identity, v]));
+      const vaMap = new Map(vaData.map((v) => [v.vote_account, v]));
+      const pubkeys = new Set<string>();
+      for (const v of swData) pubkeys.add(v.vote_identity);
+      const refreshed = enrichValidators({
+        pubkeys: Array.from(pubkeys),
+        stakewiz: stakewizMap,
+        validatorsApp: vaMap,
+        logger: logger.forModule('enrichment'),
+        now: nowSeconds(),
+      });
+      storage.upsertValidators(refreshed);
+      log.info('validators.refreshed', { count: refreshed.length, mode: 'skip-path' });
+    } catch (e) {
+      log.warn('validators.refresh.failed', { error: errMessage(e) });
+    }
     storage.close();
     return;
   }

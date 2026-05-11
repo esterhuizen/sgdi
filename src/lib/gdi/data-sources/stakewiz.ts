@@ -31,6 +31,8 @@ export type StakewizValidator = {
   commission: number | null;
   website: string | null;
   image: string | null;
+  delinquent: boolean | null;     // true = not voting this epoch (per Solana RPC)
+  epoch_credits: number | null;   // votes produced in current epoch (0 = no production yet)
 };
 
 export class StakewizError extends Error {
