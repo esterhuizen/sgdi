@@ -91,16 +91,20 @@ export default function MethodologyPage() {
         </p>
 
         <p className="mt-6 max-w-3xl text-sm leading-relaxed text-ink-muted">
-          A secondary signal, the <strong className="text-ink">Network Impact Score</strong>:
+          A secondary signal, the <strong className="text-ink">Network Impact Score</strong> —
+          shown on each pool&apos;s detail page but not used in the GDI itself:
         </p>
         <pre className="mt-3 overflow-x-auto rounded-lg bg-bg-muted p-4 text-sm leading-relaxed">
 {`NIS  =  Σᵥ wᵥ · stakewiz_wiz_score(v)`}
         </pre>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
-          Captures whether a pool delegates to validators that improve the
-          network&apos;s overall health (as scored by Stakewiz). A pool can be
-          geographically well-distributed but still delegate to under-performing
-          validators; NIS surfaces that.
+          Captures whether a pool delegates to validators that score well on
+          Stakewiz&apos;s broader health metric (uptime, vote credits, skip rate,
+          commission). A pool can be geographically well-distributed but still
+          delegate to under-performing validators; NIS surfaces that. It&apos;s
+          intentionally NOT mixed into the GDI — separate concerns deserve
+          separate signals, and the leaderboard&apos;s job is decentralisation,
+          not operational quality.
         </p>
       </section>
 
@@ -156,23 +160,50 @@ export default function MethodologyPage() {
 
       <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
-          Network baseline — how to read it
+          The active validator set (what counts as &quot;the network&quot;)
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
-          Applying the same formula to the entire active validator set gives
-          the <strong className="text-ink">network baseline GDI</strong> — by
-          construction, the network&apos;s own stake-weighted average rarity. A
-          pool whose GDI is{' '}
-          <strong className="text-ink">above the baseline</strong> is preferentially
-          delegating to less-popular places than the network average — directly
-          reducing concentration. A pool whose GDI is{' '}
-          <strong className="text-ink">below the baseline</strong> is reinforcing
-          already-popular spots — concentrating the network further.
+          Network shares are stake-weighted over Solana&apos;s{' '}
+          <strong className="text-ink">actively-voting</strong> validator set:
+        </p>
+        <pre className="mt-3 overflow-x-auto rounded-lg bg-bg-muted p-4 text-sm leading-relaxed">
+{`active = { v in Stakewiz : !v.delinquent AND v.activated_stake > 0 }`}
+        </pre>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          Roughly <strong className="text-ink">760 of ~1,955</strong>{' '}
+          Stakewiz records at any given time. Delinquent or zero-stake
+          validators still appear on chain (their stake is delegated, just
+          not producing votes), but counting them in the denominator
+          would inflate the network size and artificially lower rarity
+          values for popular buckets. The active-set definition matches
+          Solana&apos;s{' '}
+          <code className="rounded bg-bg-muted px-1.5 py-0.5">getVoteAccounts.current</code>{' '}
+          convention used by Stakewiz, Solana Beach, and other ecosystem
+          tooling.
         </p>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
-          This is the metric&apos;s honest claim: it isolates which pools are
-          contributing to decentralisation versus exacerbating concentration,
-          regardless of size or yield.
+          The same definition gates the active-set rank shown on each
+          validator&apos;s lookup page at{' '}
+          <Link href="/validator" className="underline decoration-ring underline-offset-2 hover:text-ink">/validator</Link>.
+        </p>
+      </section>
+
+      <section className="mt-12">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
+          Network baseline (reference value)
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          Applying the same formula to the active validator set gives the{' '}
+          <strong className="text-ink">network baseline GDI</strong> — by
+          construction, the network&apos;s own stake-weighted average rarity.
+          It&apos;s published at{' '}
+          <code className="rounded bg-bg-muted px-1.5 py-0.5">/gdi/network-baseline.json</code>{' '}
+          each epoch as a reference value. The leaderboard ranks pools by
+          GDI directly (higher = more decentralised) rather than by
+          deviation from the baseline; we found the rank-based framing
+          easier to read than &quot;+X% vs baseline&quot;. The baseline is
+          still useful as a single number for &quot;how decentralised is
+          Solana right now overall?&quot;.
         </p>
       </section>
 
@@ -262,15 +293,17 @@ export default function MethodologyPage() {
           <li>
             <strong className="text-ink">Per-epoch numbers are noisy.</strong>{' '}
             Pool rebalancing causes legitimate single-epoch swings of several
-            percent. The 5-epoch and 10-epoch rolling averages are the
-            trustworthy signal.
+            percent. The score we publish is the current epoch&apos;s value;
+            multi-epoch rolling averages aren&apos;t computed yet (planned).
+            Read trends across a few consecutive epochs of raw JSON for now.
           </li>
           <li>
             <strong className="text-ink">A pool with one validator in a rare
             place can score very high.</strong>{' '}
             The leaderboard surfaces validator-count alongside the score so
-            small pools are visually distinct, and we focus the leaderboard on
-            top-25-by-TVL pools (which all have multiple validators).
+            small pools are visually distinct. We track the top-20 SPL stake
+            pools by TVL; single-validator pools are excluded from the ranked
+            leaderboard and surface separately as &quot;tracked but unscored&quot;.
           </li>
           <li>
             <strong className="text-ink">Placement coverage.</strong>{' '}
@@ -288,20 +321,38 @@ export default function MethodologyPage() {
           Version policy
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
-          Methodology version: <code className="rounded bg-bg-muted px-1.5 py-0.5">{METHODOLOGY_VERSION}</code>.
+          Current methodology version: <code className="rounded bg-bg-muted px-1.5 py-0.5">{METHODOLOGY_VERSION}</code>.
           Historical scores remain reproducible under their original version
-          forever; the leaderboard transparently flags any historical epoch
-          computed under an older methodology version. See{' '}
-          <a
-            href="https://github.com/esterhuizen/sgdi/blob/main/CONTRIBUTING.md"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline decoration-ring underline-offset-2 hover:text-ink"
-          >
-            CONTRIBUTING.md
-          </a>{' '}
-          for the bump policy.
+          forever — each <code>pool_scores</code> row carries the version it
+          was computed under, and a methodology bump only affects new epochs.
         </p>
+        <table className="mt-4 w-full text-sm">
+          <thead>
+            <tr className="border-b border-ring text-left text-xs uppercase tracking-wider text-ink-dim">
+              <th className="py-2 pr-4">Version</th>
+              <th className="py-2 pr-4">Change</th>
+              <th className="py-2">Effect</th>
+            </tr>
+          </thead>
+          <tbody className="text-ink-muted">
+            <tr className="border-b border-ring">
+              <td className="py-2 pr-4 font-mono font-medium text-ink">gdi-1.0.0</td>
+              <td className="py-2 pr-4">Initial methodology.</td>
+              <td className="py-2">Network shares computed over { '{ stake > 0 }' } (~1,929 records).</td>
+            </tr>
+            <tr>
+              <td className="py-2 pr-4 font-mono font-medium text-ink">gdi-1.1.0</td>
+              <td className="py-2 pr-4">
+                Tightened the network denominator to actively-voting
+                validators only: <code>!delinquent &amp;&amp; stake &gt; 0</code>.
+              </td>
+              <td className="py-2">
+                Smaller denominator (~760 instead of ~1,929) lifts rarity
+                values uniformly; pool GDI rankings shift only slightly.
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section className="mt-12">

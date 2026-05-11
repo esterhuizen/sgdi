@@ -251,8 +251,17 @@ async function main() {
   let baselineRows: PoolStakeRow[] = [];
   let baselineMeta: Map<string, ValidatorMetadata> = new Map();
   if (stakewizData.length > 0) {
+    // gdi-1.1.0: "the network" = actively-voting validators with stake.
+    // Delinquent / dust nodes still hold delegations but don't produce
+    // votes; counting them in the denominator inflates the network size
+    // and lowers rarity for popular buckets. Stakewiz's `delinquent` flag
+    // is derived from Solana's getVoteAccounts RPC.
     baselineRows = stakewizData
-      .filter((v) => v.activated_stake != null && v.activated_stake > 0)
+      .filter((v) =>
+        v.activated_stake != null
+        && v.activated_stake > 0
+        && !v.delinquent,
+      )
       .map((v) => ({
         pubkey: v.vote_identity,
         stakeLamports: BigInt(Math.floor((v.activated_stake as number) * 1e9)),

@@ -3,7 +3,19 @@
 // This is the soul of SGDI. It must remain side-effect-free, deterministic,
 // and unit-testable without mocks. Stays pure or the design has failed.
 //
-// Methodology (gdi-1.0.0):
+// Methodology (gdi-1.1.0):
+//
+// Version history:
+//   gdi-1.0.0  Initial. Network shares computed over { activated_stake > 0 } —
+//              about 1929 validators including delinquent and dust nodes.
+//   gdi-1.1.0  Tightened "the network" to actively-voting validators only:
+//              { !delinquent AND activated_stake > 0 } — about 760 validators,
+//              matching Solana's getVoteAccounts.current convention used by
+//              Stakewiz, Solana Beach, etc. Inactive/delinquent nodes still
+//              hold stake but don't vote and shouldn't count as part of the
+//              network's stake-weighted denominator. Existing pool_scores
+//              under gdi-1.0.0 remain unchanged; new ingest writes 1.1.0.
+//
 //
 //   For each validator v in a pool with stake fraction wᵥ:
 //     rarity_D(v) = -ln( network_share_D(category of v) )    D ∈ {country, city, ASN}
@@ -20,7 +32,7 @@
 //   geographic / network positions — directly contributing to network
 //   decentralisation.
 
-export const METHODOLOGY_VERSION = 'gdi-1.0.0';
+export const METHODOLOGY_VERSION = 'gdi-1.1.0';
 
 /**
  * Lower-bound on a category's network share when computing rarity. Prevents
