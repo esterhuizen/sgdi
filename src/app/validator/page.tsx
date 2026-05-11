@@ -28,7 +28,7 @@ export default async function ValidatorLookupPage() {
 
   return (
     <main className="container-narrow py-16 md:py-20">
-      <Link href="/" className="text-sm text-ink-muted underline-offset-2 hover:underline">
+      <Link href="/" className="drilldown text-sm text-ink-muted hover:text-ink">
         ← Back to leaderboard
       </Link>
 
@@ -108,7 +108,7 @@ export default async function ValidatorLookupPage() {
                   <tr key={v.vote_pubkey} className="border-t border-ring">
                     <td className="num py-2.5 pl-4 pr-3 text-ink-muted">#{v.rank}</td>
                     <td className="py-2.5 pr-3">
-                      <Link href={`/validator/${v.vote_pubkey}`} className="hover:underline">
+                      <Link href={`/validator/${v.vote_pubkey}`} className="drilldown text-ink">
                         {v.identity_name || (
                           <span className="font-mono text-xs">{v.vote_pubkey.slice(0, 8)}…</span>
                         )}

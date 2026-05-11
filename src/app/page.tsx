@@ -5,7 +5,6 @@ import { GdiLink } from '@/components/GdiLink';
 import { Leaderboard } from '@/components/Leaderboard';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { loadLeaderboard } from '@/lib/data';
-import { METHODOLOGY_VERSION } from '@/lib/gdi/scoring';
 
 // Re-render at most every 60 seconds. Underlying JSON updates per ingest
 // (every 30 min default), so 60s page revalidate is plenty fresh.
@@ -56,36 +55,27 @@ export default async function HomePage() {
       {/* Hairline accent stripe — the ONLY Solana brand colour on the page */}
       <div className="h-[3px] w-full bg-gradient-to-r from-accent-green via-accent-purple to-accent-purple" />
 
-      {/* TRUST CLUSTER — small persistent strip showing freshness + provenance.
-          Reads like an institutional-publication colophon. */}
+      {/* TOP STRIP — only the things first-time visitors need at-a-glance:
+          freshness signal, methodology link, validator lookup, theme toggle.
+          License / data sources / epoch number all moved to other surfaces
+          (footer, methodology page, stat strip respectively). */}
       <div className="border-b border-ring bg-bg-muted/60">
         <div className="container-narrow flex flex-wrap items-center justify-between gap-3 py-2.5 text-xs">
           {data ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-dim">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-ink-dim">
               <span className="inline-flex items-center gap-1.5">
                 <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
                 <span>Updated <span className="text-ink-muted">{freshnessAgo(data.last_published_at)}</span></span>
               </span>
-              <Separator />
-              <span>epoch <span className="num text-ink-muted">{data.epoch}</span></span>
-              <Separator />
-              <span>methodology <span className="num text-ink-muted">{METHODOLOGY_VERSION}</span></span>
-              <Separator />
-              <span>Apache-2.0</span>
-              <Separator />
-              <span className="hidden md:inline">
-                data:{' '}
-                <a
-                  href="/methodology#data-sources"
-                  className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
-                >
-                  Helius / Stakewiz / Validators.app / Jupiter
-                </a>
-              </span>
-              <Separator />
+              <Link
+                href="/methodology"
+                className="drilldown text-ink-muted hover:text-ink"
+              >
+                Methodology →
+              </Link>
               <Link
                 href="/validator"
-                className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
+                className="drilldown text-ink-muted hover:text-ink"
               >
                 Validator lookup →
               </Link>
@@ -116,13 +106,6 @@ export default async function HomePage() {
           </p>
 
           <div className="mt-7 flex flex-wrap gap-3 text-sm">
-            <Link
-              href="/methodology"
-              className="inline-flex items-center gap-1 rounded-full border border-ring bg-surface px-4 py-2 text-ink transition-colors hover:border-ink"
-            >
-              How is this computed?
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </Link>
             <a
               href="https://github.com/esterhuizen/sgdi"
               target="_blank"
@@ -210,7 +193,7 @@ export default async function HomePage() {
               href="https://github.com/esterhuizen/sgdi/issues/new?template=pool-inclusion.yml"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
+              className="drilldown text-ink-muted hover:text-ink"
             >
               Submit it for inclusion →
             </a>
@@ -226,7 +209,7 @@ export default async function HomePage() {
                 href="https://x.com/tielmane"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
+                className="drilldown text-ink-muted hover:text-ink"
               >
                 @tielmane
               </a>{' '}
@@ -235,21 +218,21 @@ export default async function HomePage() {
                 href="https://t.me/realtielman"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
+                className="drilldown text-ink-muted hover:text-ink"
               >
                 @realtielman
               </a>{' '}
               on Telegram). Methodology open and reproducible from public data — Apache-2.0 licensed.
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1">
-              <Link href="/methodology" className="hover:text-ink">
+              <Link href="/methodology" className="drilldown hover:text-ink">
                 Methodology
               </Link>
               <a
                 href="https://github.com/esterhuizen/sgdi"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-ink"
+                className="drilldown hover:text-ink"
               >
                 GitHub
               </a>
@@ -257,7 +240,7 @@ export default async function HomePage() {
                 href="https://github.com/esterhuizen/sgdi/issues/new/choose"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-ink"
+                className="drilldown hover:text-ink"
               >
                 Contact / report an issue
               </a>
@@ -267,10 +250,6 @@ export default async function HomePage() {
       </div>
     </main>
   );
-}
-
-function Separator() {
-  return <span aria-hidden className="text-ink-dim/60">·</span>;
 }
 
 function StatCard({

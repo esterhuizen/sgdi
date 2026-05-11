@@ -77,7 +77,7 @@ export default async function ValidatorDetailPage({ params }: Props) {
     // would help, but for v1 we just show "not in active set" with a hint.
     return (
       <main className="container-narrow py-16">
-        <Link href="/validator" className="text-sm text-ink-muted underline-offset-2 hover:underline">
+        <Link href="/validator" className="drilldown text-sm text-ink-muted hover:text-ink">
           ← Back to validator lookup
         </Link>
         <h1 className="mt-8 font-display text-2xl font-semibold text-ink">
@@ -138,7 +138,7 @@ export default async function ValidatorDetailPage({ params }: Props) {
 
   return (
     <main className="container-narrow py-12 md:py-16">
-      <Link href="/validator" className="text-sm text-ink-muted underline-offset-2 hover:underline">
+      <Link href="/validator" className="drilldown text-sm text-ink-muted hover:text-ink">
         ← Back to validator lookup
       </Link>
 
@@ -295,7 +295,7 @@ export default async function ValidatorDetailPage({ params }: Props) {
                     <td className="py-2.5 pl-4 pr-3">
                       <Link
                         href={`/pools/${p.address}`}
-                        className="text-ink hover:underline"
+                        className="drilldown text-ink"
                       >
                         {p.name || fmt.truncAddr(p.address)}
                       </Link>
@@ -318,7 +318,7 @@ export default async function ValidatorDetailPage({ params }: Props) {
           href="https://stakewiz.com/"
           target="_blank"
           rel="noopener noreferrer"
-          className="underline decoration-ring underline-offset-2 hover:text-ink"
+          className="drilldown hover:text-ink"
         >
           Stakewiz
         </a>

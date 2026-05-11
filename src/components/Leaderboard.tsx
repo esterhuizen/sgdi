@@ -61,7 +61,7 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
               <td className="py-4 pr-3">
                 <Link
                   href={`/pools/${p.pool_address}`}
-                  className="font-medium text-ink hover:underline"
+                  className="drilldown font-medium text-ink"
                 >
                   {p.pool_name || fmt.addr(p.pool_address)}
                 </Link>
@@ -90,7 +90,7 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
           For reference, the network-wide average <GdiLink /> across all{' '}
           <span className="num">{baseline.validator_count ?? '—'}</span> active Solana validators is{' '}
           <span className="num font-medium text-ink-muted">{fmt.num(baseline.gdi, 2)}</span>.{' '}
-          <Link href="/methodology" className="underline decoration-ring underline-offset-2 hover:text-ink">
+          <Link href="/methodology" className="drilldown text-ink-muted hover:text-ink">
             How this is computed.
           </Link>
         </div>

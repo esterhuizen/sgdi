@@ -56,7 +56,7 @@ export default async function PoolDetailPage({ params }: Props) {
 
   return (
     <main className="container-narrow py-14 md:py-20">
-      <Link href="/" className="text-sm text-ink-muted underline-offset-2 hover:underline">
+      <Link href="/" className="drilldown text-sm text-ink-muted hover:text-ink">
         ← Back to leaderboard
       </Link>
 
@@ -158,7 +158,7 @@ export default async function PoolDetailPage({ params }: Props) {
                   <td className="py-3 pl-5 pr-3 font-mono text-xs">
                     <Link
                       href={`/validator/${v.pubkey}`}
-                      className="text-ink-muted underline decoration-ring underline-offset-2 hover:text-ink"
+                      className="drilldown text-ink-muted hover:text-ink"
                       title="View this validator's decentralisation profile"
                     >
                       {fmt.addr(v.pubkey)}
@@ -187,7 +187,7 @@ export default async function PoolDetailPage({ params }: Props) {
 
       <footer className="mt-20 border-t border-ring pt-6 text-xs text-ink-dim">
         Computed under {latest.score.methodology_version}. See{' '}
-        <Link href="/methodology" className="underline decoration-ring underline-offset-2 hover:text-ink">
+        <Link href="/methodology" className="drilldown hover:text-ink">
           methodology
         </Link>{' '}
         for the formula.

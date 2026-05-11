@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function MethodologyPage() {
   return (
     <main className="container-narrow py-20 md:py-28">
-      <Link href="/" className="text-sm text-ink-muted underline-offset-2 hover:underline">
+      <Link href="/" className="drilldown text-sm text-ink-muted hover:text-ink">
         ← Back to leaderboard
       </Link>
 
@@ -25,7 +25,7 @@ export default function MethodologyPage() {
           APIs. If you can&apos;t reproduce it from this page, that&apos;s a bug — please{' '}
           <a
             href="https://github.com/esterhuizen/sgdi/issues"
-            className="underline decoration-ring underline-offset-2 hover:text-ink"
+            className="drilldown hover:text-ink"
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -184,7 +184,7 @@ export default function MethodologyPage() {
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
           The same definition gates the active-set rank shown on each
           validator&apos;s lookup page at{' '}
-          <Link href="/validator" className="underline decoration-ring underline-offset-2 hover:text-ink">/validator</Link>.
+          <Link href="/validator" className="drilldown hover:text-ink">/validator</Link>.
         </p>
       </section>
 
@@ -262,7 +262,7 @@ export default function MethodologyPage() {
           would be a red flag — if you spot one,{' '}
           <a
             href="https://github.com/esterhuizen/sgdi/issues"
-            className="underline decoration-ring underline-offset-2 hover:text-ink"
+            className="drilldown hover:text-ink"
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -365,7 +365,7 @@ export default function MethodologyPage() {
             href="https://x.com/tielmane"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline decoration-ring underline-offset-2 hover:text-ink"
+            className="drilldown hover:text-ink"
           >
             @tielmane
           </a>{' '}
@@ -374,7 +374,7 @@ export default function MethodologyPage() {
             href="https://t.me/realtielman"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline decoration-ring underline-offset-2 hover:text-ink"
+            className="drilldown hover:text-ink"
           >
             @realtielman
           </a>{' '}
@@ -383,7 +383,7 @@ export default function MethodologyPage() {
             href="https://definity.finance"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline decoration-ring underline-offset-2 hover:text-ink"
+            className="drilldown hover:text-ink"
           >
             Definity
           </a>{' '}

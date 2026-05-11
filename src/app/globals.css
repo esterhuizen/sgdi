@@ -82,4 +82,21 @@ body {
     font-feature-settings: 'tnum', 'zero';
     letter-spacing: -0.01em;
   }
+
+  /* Drilldown affordance — every clickable text link gets the dotted
+     underline so visitors can see at a glance "this is clickable". Pill
+     buttons and icon buttons opt out by not applying this class.
+     GdiLink (the glossary-style link for the GDI metric) uses its own
+     variant with cursor-help — it's a definition link, semantically
+     different from a navigation drilldown. */
+  .drilldown {
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-decoration-color: rgb(var(--color-ink-dim) / 0.7);
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s ease, color 0.15s ease;
+  }
+  .drilldown:hover {
+    text-decoration-color: rgb(var(--color-ink) / 0.9);
+  }
 }
