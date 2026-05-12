@@ -30,7 +30,7 @@ const TVL_PRESETS: { value: number; label: string }[] = [
   { value: 1_000_000, label: '1M+' },
 ];
 
-const DEFAULT_TVL_FLOOR = 50_000;
+const DEFAULT_TVL_FLOOR = 100_000;
 
 function formatFloor(sol: number): string {
   if (sol >= 1_000_000) return `${sol / 1_000_000}M`;
