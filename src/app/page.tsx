@@ -81,6 +81,13 @@ export default async function HomePage() {
     ? topConcentrationBucket(validatorIndex.validators, validatorIndex.total_active_stake_sol, (v) => v.city)
     : null;
 
+  // Look up the asn_name for the most-concentrated ASN. ASN strings like
+  // "AS20326" are opaque on their own; surfacing the operator's name
+  // ("TeraSwitch") anchors the abstraction.
+  const topAsnName = concentrationByASN
+    ? validatorIndex?.validators.find((v) => v.asn === concentrationByASN.key)?.asn_name ?? null
+    : null;
+
   return (
     <main className="min-h-screen">
       {/* Hairline accent stripe — the ONLY Solana brand colour on the page */}
@@ -174,6 +181,7 @@ export default async function HomePage() {
                 label="Most-concentrated ASN"
                 share={concentrationByASN?.share}
                 bucket={concentrationByASN?.key}
+                bucketSubtitle={topAsnName}
                 sol={concentrationByASN?.sol}
               />
               <ConcentrationCard
@@ -293,11 +301,14 @@ function ConcentrationCard({
   label,
   share,
   bucket,
+  bucketSubtitle,
   sol,
 }: {
   label: string;
   share: number | undefined;
   bucket: string | undefined;
+  /** Optional human name to attach to an opaque bucket key (e.g. "TeraSwitch" for "AS20326"). */
+  bucketSubtitle?: string | null;
   sol: number | undefined;
 }) {
   const pct = share != null ? (share * 100).toFixed(1) : '—';
@@ -320,6 +331,13 @@ function ConcentrationCard({
       </div>
       <div className="mt-1.5 text-xs text-ink-muted">
         {bucket ?? '—'}
+        {bucketSubtitle && (
+          <>
+            {' '}
+            <span className="text-ink-dim">·</span>{' '}
+            <span className="text-ink-muted">{bucketSubtitle}</span>
+          </>
+        )}
         {sol != null && (
           <>
             {' '}
