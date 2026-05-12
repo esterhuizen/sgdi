@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { ArrowUpRight } from 'lucide-react';
 import { GdiLink } from '@/components/GdiLink';
 import { LeaderboardWithSearch } from '@/components/LeaderboardWithSearch';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -109,7 +108,7 @@ export default async function HomePage() {
                 href="/methodology"
                 className="drilldown text-ink-muted hover:text-ink"
               >
-                Methodology →
+                Index methodology →
               </Link>
               <Link
                 href="/validator"
@@ -117,6 +116,14 @@ export default async function HomePage() {
               >
                 Validator lookup →
               </Link>
+              <a
+                href="/gdi/leaderboard-latest.json"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="drilldown text-ink-muted hover:text-ink"
+              >
+                Raw data · JSON →
+              </a>
             </div>
           ) : (
             <div className="text-ink-dim">First leaderboard arriving at next epoch boundary.</div>
@@ -146,26 +153,6 @@ export default async function HomePage() {
             in every pool, every epoch — and rank pools by how widely their stake is spread.
           </p>
 
-          <div className="mt-7 flex flex-wrap gap-3 text-sm">
-            <a
-              href="https://github.com/esterhuizen/sgdi"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-full border border-ring bg-surface px-4 py-2 text-ink-muted transition-colors hover:border-ink hover:text-ink"
-            >
-              Open source · GitHub
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </a>
-            <a
-              href="/gdi/leaderboard-latest.json"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-full border border-ring bg-surface px-4 py-2 text-ink-muted transition-colors hover:border-ink hover:text-ink"
-            >
-              Raw data · JSON
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </a>
-          </div>
         </header>
 
         {/* CONCENTRATION HEADLINES — the live "why" of the index. Replaces
@@ -326,7 +313,7 @@ function ConcentrationCard({
           : sol.toFixed(0);
   return (
     <div className="surface p-5">
-      <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-ink-dim">
+      <div className="text-[11px] font-medium uppercase leading-tight tracking-[0.14em] text-ink-dim min-h-[2.5em]">
         {label}
       </div>
       <div className="num mt-2.5 text-3xl font-bold text-ink">
