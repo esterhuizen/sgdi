@@ -298,6 +298,93 @@ export type PoolDelegation = {
   zeroStakeCount: number;
 };
 
+// ───────────────────────────────────────────────────────────────────────────
+// Pool discovery — enumerate all StakePool accounts owned by known programs,
+// rank by TVL.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type DiscoveredPool = {
+  address: string;
+  program: string;
+  poolMint: string;
+  totalLamports: bigint;
+};
+
+/**
+ * For each program in `programIds`, calls getProgramAccounts with a
+ * discriminator filter (account_type byte == 1 → StakePool), decodes each
+ * result with `parseStakePoolAccount`, then merges + sorts by TVL desc and
+ * returns the top N.
+ *
+ * Failure handling is per-program and per-account: a single bad decode or a
+ * single program 429 doesn't stop the rest. Returns an empty array only if
+ * EVERY program call failed.
+ */
+export async function discoverTopStakePoolsByTvl(
+  rpc: ReturnType<typeof createRpc>,
+  programIds: readonly string[],
+  topN: number,
+  logger?: ModuleLogger,
+): Promise<DiscoveredPool[]> {
+  // memcmp filter: bytes=base58(0x01) → '2'. Restricts results to StakePool
+  // accounts (skipping ValidatorList accounts owned by the same program).
+  const ACCOUNT_TYPE_STAKE_POOL_B58 = '2';
+
+  const all: DiscoveredPool[] = [];
+  for (const programId of programIds) {
+    try {
+      const result = await rpc.call<
+        Array<{ pubkey: string; account: { data: [string, 'base64']; owner: string } }>
+      >('getProgramAccounts', [
+        programId,
+        {
+          encoding: 'base64',
+          filters: [{ memcmp: { offset: 0, bytes: ACCOUNT_TYPE_STAKE_POOL_B58 } }],
+        },
+      ]);
+      let parsed = 0;
+      let failed = 0;
+      for (const acc of result) {
+        try {
+          const buf = Buffer.from(acc.account.data[0], 'base64');
+          const pool = parseStakePoolAccount(buf);
+          all.push({
+            address: acc.pubkey,
+            program: programId,
+            poolMint: pool.poolMint,
+            totalLamports: pool.totalLamports,
+          });
+          parsed++;
+        } catch (e) {
+          failed++;
+          logger?.warn('pool.discover.parse_failed', {
+            program: programId,
+            address: acc.pubkey,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+      logger?.info('pool.discover.program', {
+        program: programId,
+        returned: result.length,
+        parsed,
+        parse_failed: failed,
+      });
+    } catch (e) {
+      logger?.warn('pool.discover.program_failed', {
+        program: programId,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  all.sort((a, b) => {
+    const diff = b.totalLamports - a.totalLamports;
+    return diff > 0n ? 1 : diff < 0n ? -1 : 0;
+  });
+  return all.slice(0, topN);
+}
+
 /**
  * Read a pool's current delegation set from chain.
  * - Verifies the pool is owned by a known SPL-stake-pool family program.

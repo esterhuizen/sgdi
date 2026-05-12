@@ -27,9 +27,17 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createLogger } from '../src/lib/gdi/logger.ts';
 import { openStorage } from '../src/lib/gdi/storage.ts';
-import { createRpc, fetchPoolDelegations } from '../src/lib/gdi/data-sources/rpc.ts';
+import {
+  createRpc,
+  fetchPoolDelegations,
+  discoverTopStakePoolsByTvl,
+  SPL_STAKE_POOL_PROGRAM_ID,
+  SANCTUM_SVSP_PROGRAM_ID,
+  SANCTUM_MULTI_PROGRAM_ID,
+} from '../src/lib/gdi/data-sources/rpc.ts';
 import { createStakewiz } from '../src/lib/gdi/data-sources/stakewiz.ts';
 import { createValidatorsApp } from '../src/lib/gdi/data-sources/validators-app.ts';
+import { createJupiter, buildMintNameMap } from '../src/lib/gdi/data-sources/jupiter.ts';
 import { enrichValidators } from '../src/lib/gdi/enrichment.ts';
 import {
   computePoolScores,
@@ -41,6 +49,17 @@ import {
 } from '../src/lib/gdi/scoring.ts';
 
 const WATCHLIST_PATH = resolve('./config/pools-watchlist.json');
+
+// How many top-by-TVL pools we keep per ingest. ~100 covers the long tail of
+// real liquid-staking products on Solana; raising further mostly adds tiny
+// single-validator Sanctum pools.
+const TOP_POOLS_BY_TVL = Number(process.env.SGDI_TOP_POOLS ?? 100);
+
+// Pools below this raw TVL get filtered out. 20,000 SOL is the cutoff that
+// separates real-product LSTs (smallest legitimate ones sit ~20-50k SOL) from
+// dust / mass-delegation experiments that spread tiny stake across many
+// validators and would otherwise dominate the GDI leaderboard.
+const MIN_POOL_TVL_LAMPORTS = 20_000n * 1_000_000_000n; // 20,000 SOL
 
 type WatchlistEntry = {
   pool_address: string;
@@ -84,6 +103,7 @@ async function main() {
   const rpc = createRpc({ url: rpcUrl, logger: logger.forModule('rpc') });
   const stakewiz = createStakewiz({ logger: logger.forModule('stakewiz') });
   const validatorsApp = createValidatorsApp({ logger: logger.forModule('validators-app') });
+  const jupiter = createJupiter({ logger: logger.forModule('jupiter') });
 
   log.info('start', { run_id: logger.runId });
 
@@ -134,15 +154,31 @@ async function main() {
     status: 'in_progress',
   });
 
-  // Watchlist — bootstrap list of pools to track. Will be expanded later via
-  // a SolanaCompass top-25 discovery script.
+  // Discover the top-N stake pools on chain by TVL. Watchlist still loaded,
+  // but its role is now name-override only — a curated alias for pools whose
+  // Jupiter entry is missing or unhelpful (e.g. "Definity" — Sanctum-Multi
+  // pool with no clean Jupiter symbol).
   const watchlist = readWatchlist();
-  const pools = watchlist.map((w) => w.pool_address);
   const watchlistByAddress = new Map(watchlist.map((w) => [w.pool_address, w]));
-  log.info('watchlist.read', { count: pools.length });
-  if (pools.length === 0) {
-    log.warn('watchlist.empty', {
-      hint: 'add pool addresses to config/pools-watchlist.json:additions',
+  log.info('watchlist.read', { count: watchlist.length });
+
+  const discovered = await discoverTopStakePoolsByTvl(
+    rpc,
+    [SPL_STAKE_POOL_PROGRAM_ID, SANCTUM_SVSP_PROGRAM_ID, SANCTUM_MULTI_PROGRAM_ID],
+    TOP_POOLS_BY_TVL,
+    logger.forModule('discover'),
+  );
+  // Strip dust pools (≤1 SOL); they're either abandoned or zero-stake artefacts.
+  const nontrivial = discovered.filter((p) => p.totalLamports >= MIN_POOL_TVL_LAMPORTS);
+  log.info('pools.discovered', {
+    raw_count: discovered.length,
+    after_min_tvl: nontrivial.length,
+    min_tvl_sol: Number(MIN_POOL_TVL_LAMPORTS) / 1e9,
+  });
+
+  if (nontrivial.length === 0) {
+    log.error('pools.discovered.empty', {
+      hint: 'discovery returned no pools above min TVL — RPC or filter issue',
     });
     storage.finishRun({
       run_id: logger.runId,
@@ -150,28 +186,51 @@ async function main() {
       status: 'failed',
       pools_processed: 0,
       pools_failed: 0,
-      notes: 'watchlist empty',
+      notes: 'discovery returned no pools',
     });
     storage.close();
     return;
   }
+
+  // Pull Jupiter's LST tag list to map pool mints → friendly names. Soft-fail:
+  // [] on error → pools just get watchlist names or fall through to nameless.
+  const jupiterEntries = await jupiter.fetchLstList();
+  const mintToName = buildMintNameMap(jupiterEntries);
+  log.info('jupiter.names', { lst_count: jupiterEntries.length });
+
+  // Build the iteration list. Name precedence: watchlist (manual override) →
+  // Jupiter (mint lookup) → null (frontend shows truncated address).
+  type PoolToIngest = {
+    address: string;
+    program: string;
+    poolMint: string;
+    name: string | null;
+  };
+  const pools: PoolToIngest[] = nontrivial.map((p) => ({
+    address: p.address,
+    program: p.program,
+    poolMint: p.poolMint,
+    name:
+      watchlistByAddress.get(p.address)?.name ??
+      mintToName.get(p.poolMint) ??
+      null,
+  }));
 
   let processed = 0;
   let failed = 0;
   const successfulPools: string[] = [];
 
   // 3. Per-pool snapshot. Small delay between pools to be polite to the RPC
-  // provider — at 20+ pools × 3 calls each, bursty traffic trips Helius rate
-  // limiting. 250ms between pools = ~5s added to a full ingest, negligible.
+  // provider — at 100 pools × 3 calls each, bursty traffic trips Helius rate
+  // limiting. 250ms between pools = ~25s added to a full ingest, negligible.
   const POOL_FETCH_DELAY_MS = 250;
-  for (const [poolIdx, poolAddress] of pools.entries()) {
+  for (const [poolIdx, pool] of pools.entries()) {
     if (poolIdx > 0) await new Promise((r) => setTimeout(r, POOL_FETCH_DELAY_MS));
     try {
-      const d = await fetchPoolDelegations(rpc, poolAddress);
-      const watchlistEntry = watchlistByAddress.get(poolAddress);
+      const d = await fetchPoolDelegations(rpc, pool.address);
       storage.upsertPool({
-        pool_address: poolAddress,
-        pool_name: watchlistEntry?.name ?? null,
+        pool_address: pool.address,
+        pool_name: pool.name,
         pool_token_mint: d.poolMint,
         pool_program: d.poolProgram,
         is_tracked: 1,
@@ -179,7 +238,7 @@ async function main() {
       });
       storage.replaceSnapshotsForPoolEpoch(
         epoch,
-        poolAddress,
+        pool.address,
         d.delegations.map((v) => ({
           validator_pubkey: v.votePubkey,
           stake_lamports: v.activeStakeLamports,
@@ -187,17 +246,18 @@ async function main() {
         })),
       );
       log.info('pool.snapshot.captured', {
-        pool: poolAddress,
+        pool: pool.address,
+        name: pool.name,
         program: d.poolProgram,
         validators: d.delegations.length,
         zero_stake_skipped: d.zeroStakeCount,
         total_sol: Number(d.totalLamports) / 1e9,
       });
       processed++;
-      successfulPools.push(poolAddress);
+      successfulPools.push(pool.address);
     } catch (e) {
       failed++;
-      log.error('pool.snapshot.failed', { pool: poolAddress, error: errMessage(e) });
+      log.error('pool.snapshot.failed', { pool: pool.address, error: errMessage(e) });
     }
   }
 

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowUpRight } from 'lucide-react';
 import { GdiLink } from '@/components/GdiLink';
-import { Leaderboard } from '@/components/Leaderboard';
+import { LeaderboardWithSearch } from '@/components/LeaderboardWithSearch';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { loadLeaderboard, loadValidatorIndex, type ValidatorIndexEntry } from '@/lib/data';
 
@@ -128,8 +128,11 @@ export default async function HomePage() {
       <div className="container-narrow pt-10 pb-24 md:pt-14">
         {/* HERO — title, why, factors. Three short paragraphs. */}
         <header className="max-w-3xl">
-          <h1 className="text-balance font-display text-3xl font-bold tracking-tight2 text-ink md:text-[44px] md:leading-[1.1]">
-            Solana Stake Pool Decentralisation Index
+          <p className="font-display text-xs font-semibold uppercase tracking-[0.22em] text-ink-dim md:text-sm">
+            Solana Stake Pool
+          </p>
+          <h1 className="mt-2 text-balance font-display text-3xl font-bold tracking-tight2 text-ink md:text-[44px] md:leading-[1.1]">
+            Geographic Decentralisation Index
           </h1>
           <p className="mt-6 text-lg leading-relaxed text-ink-muted md:text-xl md:leading-relaxed">
             Stake concentration on a few cities, network operators, or countries is real
@@ -216,10 +219,11 @@ export default async function HomePage() {
           </p>
 
           {data ? (
-            <Leaderboard
+            <LeaderboardWithSearch
               pools={data.pools}
               baseline={data.network_baseline}
               epoch={data.epoch}
+              defaultLimit={25}
             />
           ) : (
             <div className="surface p-8 text-center">

@@ -137,24 +137,16 @@ async function main() {
   const pools = storage.listTrackedPools();
   const poolMeta = new Map(pools.map((p) => [p.pool_address, p]));
 
-  // Filter unscored / single-validator pools from the leaderboard:
-  //   - Pools with 0 validators or null GDI → no stake yet, can't be ranked.
-  //   - Pools with exactly 1 validator → institutional / single-staker
-  //     products, not really comparable to multi-validator LSTs (a pool's
-  //     "geographic decentralisation" is meaningless when there's only one
-  //     place to put stake). Kept in the data layer; surfaced separately.
-  const MIN_VALIDATORS_FOR_LEADERBOARD = 2;
+  // Leaderboard inclusion rule: any pool with a real GDI and at least one
+  // validator. Single-validator pools are kept (GDI is mathematically defined
+  // for n=1 — it's the rarity of that one bucket); they rank naturally. Pools
+  // with 0 validators or null GDI have nothing to display and go to
+  // `tracked_but_unscored`.
   const scoredPools = latestScores.filter(
-    (s) =>
-      s.gdi_composite != null &&
-      (s.validator_count ?? 0) >= MIN_VALIDATORS_FOR_LEADERBOARD,
+    (s) => s.gdi_composite != null && (s.validator_count ?? 0) >= 1,
   );
   const trackedButUnscored = latestScores.filter(
-    (s) =>
-      !(
-        s.gdi_composite != null &&
-        (s.validator_count ?? 0) >= MIN_VALIDATORS_FOR_LEADERBOARD
-      ),
+    (s) => !(s.gdi_composite != null && (s.validator_count ?? 0) >= 1),
   );
 
   const leaderboard = {

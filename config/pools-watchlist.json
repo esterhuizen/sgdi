@@ -95,8 +95,27 @@
     },
     {
       "pool_address": "CV6bkrUksMwcEC4jfLTJsbHwF3Y2YurZdWWua95Fpbtd",
-      "added_at": "2026-05-10",
-      "note": "Discovered on-chain (~318k SOL). Mint 7cBuurYD... not in Jupiter LST tag list. TODO."
+      "name": "MXSOL",
+      "note": "Mexc Staked SOL. Mint 7cBuurYD... not in Jupiter LST tag list; name from Helius DAS metadata.",
+      "added_at": "2026-05-10"
+    },
+    {
+      "pool_address": "9qrFrE5qoZ3QfYZrZoeXFNRWfErpjzZKudCAoBTvgKjb",
+      "name": "BGSOL",
+      "note": "Bitget Staked SOL. Mint bgSoL... only in Jupiter's full token DB (tagged 'unknown'), not in the curated LST list.",
+      "added_at": "2026-05-12"
+    },
+    {
+      "pool_address": "SAVEY1fVMBeRVo9V9rgEz8ENTvHreftd3QgpAKBDFV4",
+      "name": "saveSOL",
+      "note": "Save Staked SOL. Mint SAVEDpx... — Jupiter full DB only, not curated LST list.",
+      "added_at": "2026-05-12"
+    },
+    {
+      "pool_address": "AdHRYZkiUQg4zPANGHB4XxoUcjbfF5TkAaWJFZ9bQALV",
+      "name": "ThetaSOL",
+      "note": "Theta Staked SOL. Mint J9fihFs... — Jupiter full DB only, not curated LST list.",
+      "added_at": "2026-05-12"
     },
     {
       "pool_address": "Bvbu55B991evqqhLtKcyTZjzQ4EQzRUwtf9T4CcpMmPL",
