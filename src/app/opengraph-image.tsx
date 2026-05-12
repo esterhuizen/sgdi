@@ -4,8 +4,9 @@ import { loadLeaderboard } from '@/lib/data';
 // Auto-generated 1200×630 PNG for tweet/Slack/Discord unfurls.
 // Renders the top-5 pools at the current epoch.
 //
-// Next.js's ImageResponse (powered by Satori) runs server-side; the JSX
-// here is a simplified subset (no Tailwind, only inline CSS / flex).
+// Dark theme to match the site's preferred default. Palette is borrowed
+// from globals.css's `html.dark` block — kept inline because Satori can't
+// read CSS variables.
 
 export const runtime = 'nodejs';
 export const size = { width: 1200, height: 630 };
@@ -14,6 +15,19 @@ export const contentType = 'image/png';
 export const revalidate = 60;
 export const alt =
   'Solana Stake Pool Decentralisation Index — every pool ranked by where its stake actually lives.';
+
+// Dark palette (mirrors --color-* in html.dark)
+const C = {
+  bg: '#0a0d12',
+  bgMuted: '#141920',
+  surface: '#12161d',
+  ring: '#242a35',
+  ink: '#e6edf3',
+  inkMuted: '#8b949e',
+  inkDim: '#6e7681',
+  accentGreen: '#14F195',
+  accentPurple: '#9945FF',
+};
 
 const fmt = {
   num: (v: number | null | undefined, d = 2) =>
@@ -44,15 +58,14 @@ export default async function Image() {
           height: '100%',
           display: 'flex',
           flexDirection: 'column',
-          background:
-            'linear-gradient(135deg, #ffffff 0%, #fafbff 50%, #f5f5fa 100%)',
-          color: '#0d1014',
+          background: `linear-gradient(135deg, ${C.bg} 0%, ${C.surface} 50%, ${C.bgMuted} 100%)`,
+          color: C.ink,
           fontFamily: 'sans-serif',
           padding: 56,
           position: 'relative',
         }}
       >
-        {/* Solana-flavoured accent stripe at top */}
+        {/* Solana accent stripe at top */}
         <div
           style={{
             display: 'flex',
@@ -61,7 +74,7 @@ export default async function Image() {
             left: 0,
             right: 0,
             height: 6,
-            background: 'linear-gradient(90deg, #14F195 0%, #9945FF 100%)',
+            background: `linear-gradient(90deg, ${C.accentGreen} 0%, ${C.accentPurple} 100%)`,
           }}
         />
 
@@ -70,32 +83,46 @@ export default async function Image() {
           <div
             style={{
               display: 'flex',
+              fontSize: 18,
+              fontWeight: 600,
+              letterSpacing: 3,
+              textTransform: 'uppercase',
+              color: C.inkDim,
+            }}
+          >
+            Solana Stake Pool
+          </div>
+          <div
+            style={{
+              display: 'flex',
               fontSize: 52,
               fontWeight: 700,
               letterSpacing: '-0.02em',
               maxWidth: 1050,
               lineHeight: 1.05,
+              marginTop: 6,
             }}
           >
-            Solana Stake Pool Decentralisation Index
+            Geographic Decentralisation Index
           </div>
           {data ? (
             <div
               style={{
                 display: 'flex',
                 fontSize: 20,
-                color: '#52566a',
+                color: C.inkMuted,
                 marginTop: 16,
               }}
             >
-              Top 5 pools by GDI · epoch {data.epoch} · {sortedPools.length === 5 ? `${data.pools.length} pools tracked` : ''}
+              Top 5 pools by GDI · epoch {data.epoch} ·{' '}
+              {sortedPools.length === 5 ? `${data.pools.length} pools tracked` : ''}
             </div>
           ) : (
             <div
               style={{
                 display: 'flex',
                 fontSize: 20,
-                color: '#52566a',
+                color: C.inkMuted,
                 marginTop: 16,
               }}
             >
@@ -109,10 +136,11 @@ export default async function Image() {
           style={{
             display: 'flex',
             flexDirection: 'column',
-            marginTop: 36,
-            border: '1px solid #ecedf3',
+            marginTop: 28,
+            border: `1px solid ${C.ring}`,
             borderRadius: 16,
             overflow: 'hidden',
+            background: C.surface,
           }}
         >
           {/* Column headers */}
@@ -120,130 +148,96 @@ export default async function Image() {
             style={{
               display: 'flex',
               padding: '14px 28px',
-              background: '#f7f7f9',
+              background: C.bgMuted,
               fontSize: 14,
               fontWeight: 600,
               textTransform: 'uppercase',
               letterSpacing: 1.2,
-              color: '#52566a',
+              color: C.inkDim,
             }}
           >
             <div style={{ width: 60, display: 'flex' }}>#</div>
             <div style={{ flex: 1, display: 'flex' }}>Pool</div>
-            <div
-              style={{
-                width: 160,
-                display: 'flex',
-                justifyContent: 'flex-end',
-              }}
-            >
-              GDI
-            </div>
-            <div
-              style={{
-                width: 160,
-                display: 'flex',
-                justifyContent: 'flex-end',
-              }}
-            >
-              Validators
-            </div>
-            <div
-              style={{
-                width: 180,
-                display: 'flex',
-                justifyContent: 'flex-end',
-              }}
-            >
-              Stake
-            </div>
+            <div style={{ width: 160, display: 'flex', justifyContent: 'flex-end' }}>GDI</div>
+            <div style={{ width: 160, display: 'flex', justifyContent: 'flex-end' }}>Validators</div>
+            <div style={{ width: 180, display: 'flex', justifyContent: 'flex-end' }}>Stake</div>
           </div>
 
           {/* Rows */}
-          {sortedPools.map((p, i) => {
-            return (
+          {sortedPools.map((p, i) => (
+            <div
+              key={p.pool_address}
+              style={{
+                display: 'flex',
+                padding: '18px 28px',
+                borderTop: `1px solid ${C.ring}`,
+                fontSize: 28,
+                alignItems: 'center',
+              }}
+            >
+              <div style={{ width: 60, display: 'flex', color: C.inkDim, fontWeight: 600 }}>
+                {i + 1}
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', fontWeight: 600, color: C.ink }}>
+                  {p.pool_name || fmt.truncAddr(p.pool_address)}
+                </div>
+                {p.pool_name && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      fontSize: 16,
+                      color: C.inkDim,
+                      marginTop: 4,
+                      fontFamily: 'monospace',
+                    }}
+                  >
+                    {fmt.truncAddr(p.pool_address)}
+                  </div>
+                )}
+              </div>
               <div
-                key={p.pool_address}
                 style={{
+                  width: 160,
                   display: 'flex',
-                  padding: '18px 28px',
-                  borderTop: '1px solid #f0f1f5',
-                  fontSize: 28,
-                  alignItems: 'center',
+                  justifyContent: 'flex-end',
+                  fontVariantNumeric: 'tabular-nums',
+                  fontWeight: 700,
                 }}
               >
-                <div
-                  style={{ width: 60, display: 'flex', color: '#8a8e9e', fontWeight: 600 }}
-                >
-                  {i + 1}
-                </div>
-                <div
-                  style={{
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                  }}
-                >
-                  <div style={{ display: 'flex', fontWeight: 600 }}>
-                    {p.pool_name || fmt.truncAddr(p.pool_address)}
-                  </div>
-                  {p.pool_name && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        fontSize: 16,
-                        color: '#8a8e9e',
-                        marginTop: 4,
-                        fontFamily: 'monospace',
-                      }}
-                    >
-                      {fmt.truncAddr(p.pool_address)}
-                    </div>
-                  )}
-                </div>
-                <div
-                  style={{
-                    width: 160,
-                    display: 'flex',
-                    justifyContent: 'flex-end',
-                    fontVariantNumeric: 'tabular-nums',
-                    fontWeight: 700,
-                  }}
-                >
-                  {fmt.num(p.gdi, 2)}
-                </div>
-                <div
-                  style={{
-                    width: 160,
-                    display: 'flex',
-                    justifyContent: 'flex-end',
-                    color: '#52566a',
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {p.validator_count ?? '—'}
-                </div>
-                <div
-                  style={{
-                    width: 180,
-                    display: 'flex',
-                    justifyContent: 'flex-end',
-                    color: '#52566a',
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {fmt.sol(p.total_stake_sol)} SOL
-                </div>
+                {fmt.num(p.gdi, 2)}
               </div>
-            );
-          })}
+              <div
+                style={{
+                  width: 160,
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  color: C.inkMuted,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {p.validator_count ?? '—'}
+              </div>
+              <div
+                style={{
+                  width: 180,
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  color: C.inkMuted,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {fmt.sol(p.total_stake_sol)} SOL
+              </div>
+            </div>
+          ))}
           {sortedPools.length === 0 && (
             <div
               style={{
                 display: 'flex',
                 padding: 32,
                 fontSize: 22,
-                color: '#8a8e9e',
+                color: C.inkDim,
                 justifyContent: 'center',
               }}
             >
@@ -261,20 +255,16 @@ export default async function Image() {
             marginTop: 'auto',
             paddingTop: 20,
             fontSize: 18,
-            color: '#52566a',
+            color: C.inkMuted,
           }}
         >
           <div style={{ display: 'flex' }}>
             Open methodology · reproducible · Apache-2.0
           </div>
-          <div style={{ display: 'flex', fontWeight: 600, color: '#0d1014' }}>
-            gdindex.app
-          </div>
+          <div style={{ display: 'flex', fontWeight: 600, color: C.ink }}>gdindex.app</div>
         </div>
       </div>
     ),
-    {
-      ...size,
-    },
+    { ...size },
   );
 }
