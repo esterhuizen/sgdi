@@ -77,8 +77,8 @@
     },
     {
       "pool_address": "StKeDUdSu7jMSnPJ1MPqDnk3RdEwD2QbJaisHMebGhw",
-      "name": "STKE",
-      "note": "STKE SOL.",
+      "name": "STKESOL",
+      "note": "STKESOL liquid staking pool token.",
       "added_at": "2026-05-10"
     },
     {
