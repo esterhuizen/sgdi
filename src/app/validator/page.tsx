@@ -93,8 +93,8 @@ export default async function ValidatorLookupPage() {
           <p className="mt-2 text-xs text-ink-dim">
             These contribute the most to network decentralisation by virtue of where they run.
           </p>
-          <div className="surface mt-3 overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="surface mt-3 overflow-x-auto">
+            <table className="w-full min-w-[36rem] text-sm">
               <thead className="bg-bg-muted/40 text-left text-xs uppercase tracking-[0.12em] text-ink-dim">
                 <tr>
                   <th className="py-2.5 pl-4 pr-3 font-semibold">Rank</th>
