@@ -11,6 +11,7 @@
 import { useMemo, useState } from 'react';
 import { Leaderboard } from './Leaderboard';
 import type { FormattedScore, FormattedBaseline } from '@/lib/data';
+import { DEFAULT_TVL_FLOOR_SOL } from '@/lib/leaderboard-config';
 
 type Props = {
   pools: FormattedScore[];
@@ -30,7 +31,7 @@ const TVL_PRESETS: { value: number; label: string }[] = [
   { value: 1_000_000, label: '1M+' },
 ];
 
-const DEFAULT_TVL_FLOOR = 100_000;
+const DEFAULT_TVL_FLOOR = DEFAULT_TVL_FLOOR_SOL;
 
 function formatFloor(sol: number): string {
   if (sol >= 1_000_000) return `${sol / 1_000_000}M`;

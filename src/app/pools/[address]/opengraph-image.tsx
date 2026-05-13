@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
-import { loadPoolLatest } from '@/lib/data';
+import { loadPoolLatest, loadLeaderboard } from '@/lib/data';
+import { DEFAULT_TVL_FLOOR_SOL } from '@/lib/leaderboard-config';
 
 // Auto-generated 1200×630 PNG that unfurls in Twitter/Discord/Slack/Telegram
 // when someone shares a pool URL. Each pool gets its own card: name, rank,
@@ -45,7 +46,10 @@ type Props = { params: Promise<{ address: string }> };
 
 export default async function Image({ params }: Props) {
   const { address } = await params;
-  const data = await loadPoolLatest(address);
+  const [data, leaderboard] = await Promise.all([
+    loadPoolLatest(address),
+    loadLeaderboard(),
+  ]);
 
   // Fallback: pool not found / not yet ingested
   if (!data) {
@@ -82,6 +86,25 @@ export default async function Image({ params }: Props) {
   const baselineGdi = data.network_baseline?.gdi ?? null;
   const aboveBaseline =
     baselineGdi != null && data.score.gdi != null && data.score.gdi > baselineGdi;
+
+  // Compute rank within the default UI view (pools >= DEFAULT_TVL_FLOOR_SOL,
+  // sorted by GDI desc). This is what visitors actually see when they land
+  // on gdindex.app — keeping the OG rank aligned avoids confusion ("but it
+  // says #4 on the site and #7 on the card").
+  //
+  // If this pool's TVL is below the default floor, it doesn't appear in
+  // that ranking at all; fall back to the per-pool rank from the published
+  // JSON (computed across all scored pools) and label it accordingly.
+  const filteredPools = (leaderboard?.pools ?? [])
+    .filter((p) => p.gdi != null && (p.total_stake_sol ?? 0) >= DEFAULT_TVL_FLOOR_SOL)
+    .sort((a, b) => (b.gdi ?? 0) - (a.gdi ?? 0));
+  const filteredRank = filteredPools.findIndex((p) => p.pool_address === data.pool.address);
+  const displayRank =
+    filteredRank >= 0
+      ? { n: filteredRank + 1, total: filteredPools.length, suffix: '' }
+      : data.rank != null && data.total_ranked > 0
+        ? { n: data.rank, total: data.total_ranked, suffix: ' (all)' }
+        : null;
 
   return new ImageResponse(
     (
@@ -157,7 +180,7 @@ export default async function Image({ params }: Props) {
             </div>
           </div>
 
-          {data.rank != null && data.total_ranked > 0 && (
+          {displayRank && (
             <div
               style={{
                 display: 'flex',
@@ -187,7 +210,7 @@ export default async function Image({ params }: Props) {
                   lineHeight: 1,
                 }}
               >
-                #{data.rank}
+                #{displayRank.n}
               </div>
               <div
                 style={{
@@ -197,7 +220,7 @@ export default async function Image({ params }: Props) {
                   marginTop: 6,
                 }}
               >
-                of {data.total_ranked}
+                of {displayRank.total}{displayRank.suffix}
               </div>
             </div>
           )}
@@ -209,8 +232,8 @@ export default async function Image({ params }: Props) {
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            marginTop: 28,
-            padding: '28px 0',
+            marginTop: 20,
+            padding: '20px 0',
             borderRadius: 16,
             border: `1px solid ${C.ring}`,
             background: C.surface,
@@ -237,7 +260,7 @@ export default async function Image({ params }: Props) {
             <div
               style={{
                 display: 'flex',
-                fontSize: 120,
+                fontSize: 104,
                 fontWeight: 700,
                 fontVariantNumeric: 'tabular-nums',
                 lineHeight: 1,
@@ -266,8 +289,8 @@ export default async function Image({ params }: Props) {
           style={{
             display: 'flex',
             justifyContent: 'space-between',
-            marginTop: 24,
-            gap: 16,
+            marginTop: 18,
+            gap: 14,
           }}
         >
           {[
