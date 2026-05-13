@@ -265,6 +265,6 @@ export default async function Image() {
         </div>
       </div>
     ),
-    { ...size },
+    { ...size, headers: { "cache-control": "public, max-age=1800, must-revalidate" } },
   );
 }

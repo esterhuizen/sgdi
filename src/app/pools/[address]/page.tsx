@@ -13,9 +13,22 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { address } = await params;
   const data = await loadPoolLatest(address);
   const name = data?.pool.name || address.slice(0, 6) + '…' + address.slice(-4);
+  // Embed the current epoch in the og:image URL so each new epoch produces a
+  // URL X has never seen, forcing it to re-scrape (and pick up the latest
+  // rank / GDI / sub-scores). Without this, Next.js's static og:image hash
+  // never changes across data updates and X serves stale cached previews.
+  const epoch = data?.score?.epoch ?? 0;
+  const ogImageUrl = `/pools/${address}/opengraph-image?epoch=${epoch}`;
   return {
     title: `${name}`,
     description: `Geographic decentralisation score and per-validator breakdown for ${name}.`,
+    openGraph: {
+      images: [{ url: ogImageUrl, width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      images: [ogImageUrl],
+    },
   };
 }
 

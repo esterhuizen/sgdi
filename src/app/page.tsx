@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { GdiLink } from '@/components/GdiLink';
 import { LeaderboardWithSearch } from '@/components/LeaderboardWithSearch';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -7,6 +8,21 @@ import { loadLeaderboard, loadValidatorIndex, type ValidatorIndexEntry } from '@
 // Re-render at most every 60 seconds. Underlying JSON updates per ingest
 // (every 30 min default), so 60s page revalidate is plenty fresh.
 export const revalidate = 60;
+
+/**
+ * Embed the current epoch in the og:image URL. Each new epoch produces a URL
+ * X has never seen, forcing a re-scrape (and a fresh top-5 leaderboard card)
+ * without anyone needing to rebuild the site or bump a manual cache buster.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const data = await loadLeaderboard();
+  const epoch = data?.epoch ?? 0;
+  const ogImageUrl = `/opengraph-image?epoch=${epoch}`;
+  return {
+    openGraph: { images: [{ url: ogImageUrl, width: 1200, height: 630 }] },
+    twitter: { card: 'summary_large_image', images: [ogImageUrl] },
+  };
+}
 
 const fmt = {
   num: (v: number | null | undefined, d = 2) =>

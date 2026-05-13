@@ -78,7 +78,7 @@ export default async function Image({ params }: Props) {
           </div>
         </div>
       ),
-      { ...size },
+      { ...size, headers: { "cache-control": "public, max-age=1800, must-revalidate" } },
     );
   }
 
@@ -363,6 +363,6 @@ export default async function Image({ params }: Props) {
         </div>
       </div>
     ),
-    { ...size },
+    { ...size, headers: { "cache-control": "public, max-age=1800, must-revalidate" } },
   );
 }
