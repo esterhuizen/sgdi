@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { loadPoolLatest, loadPoolHistory, loadNetworkBaseline } from '@/lib/data';
+import { loadPoolLatest, loadPoolHistory, loadNetworkBaseline, loadLeaderboard } from '@/lib/data';
+import { DEFAULT_TVL_FLOOR_SOL } from '@/lib/leaderboard-config';
 import { GdiLink } from '@/components/GdiLink';
 import { TrendChart } from '@/components/TrendChart';
 
@@ -46,13 +47,30 @@ const fmt = {
 
 export default async function PoolDetailPage({ params }: Props) {
   const { address } = await params;
-  const [latest, history, baselineFile] = await Promise.all([
+  const [latest, history, baselineFile, leaderboard] = await Promise.all([
     loadPoolLatest(address),
     loadPoolHistory(address),
     loadNetworkBaseline(),
+    loadLeaderboard(),
   ]);
 
   if (!latest) notFound();
+
+  // Rank shown on this page must match the landing-page leaderboard, which
+  // filters at DEFAULT_TVL_FLOOR_SOL (100k). The publish-time rank stored on
+  // latest.rank is across ALL scored pools at the ingest floor (20k SOL), so
+  // we'd see "Definity #4 of 30" here vs "Definity #3 of 23" on landing.
+  // Recompute against the same filter the UI applies.
+  const filteredPools = (leaderboard?.pools ?? [])
+    .filter((p) => p.gdi != null && (p.total_stake_sol ?? 0) >= DEFAULT_TVL_FLOOR_SOL)
+    .sort((a, b) => (b.gdi ?? 0) - (a.gdi ?? 0));
+  const filteredIdx = filteredPools.findIndex((p) => p.pool_address === latest.pool.address);
+  const displayRank =
+    filteredIdx >= 0
+      ? { n: filteredIdx + 1, total: filteredPools.length, suffix: '' }
+      : latest.rank != null && latest.total_ranked > 0
+        ? { n: latest.rank, total: latest.total_ranked, suffix: ' (all pools)' }
+        : null;
 
   // Build trend chart series. Baseline series stays — useful as a *visual*
   // backdrop for the pool's GDI line, even though we no longer surface
@@ -91,10 +109,10 @@ export default async function PoolDetailPage({ params }: Props) {
         <div className="surface p-5">
           <div className="text-xs uppercase tracking-wider text-ink-dim"><GdiLink /></div>
           <div className="num mt-2 text-3xl font-semibold text-ink">{fmt.num(latest.score.gdi, 3)}</div>
-          {latest.rank != null && latest.total_ranked > 0 ? (
+          {displayRank ? (
             <div className="mt-1 text-xs text-ink-muted">
-              Rank <span className="font-semibold text-ink">#{latest.rank}</span>{' '}
-              <span className="text-ink-dim">of {latest.total_ranked}</span>
+              Rank <span className="font-semibold text-ink">#{displayRank.n}</span>{' '}
+              <span className="text-ink-dim">of {displayRank.total}{displayRank.suffix}</span>
             </div>
           ) : (
             <div className="mt-1 text-xs text-ink-dim">unranked this epoch</div>
