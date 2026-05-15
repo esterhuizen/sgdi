@@ -260,7 +260,7 @@ export default async function Image() {
           }}
         >
           <div style={{ display: 'flex' }}>
-            Composite = ∛(country · city · ASN rarity)
+            Geometric mean of country, city, ASN rarity
           </div>
           <div style={{ display: 'flex', fontWeight: 600, color: C.ink }}>gdindex.app/locations</div>
         </div>
