@@ -42,6 +42,9 @@ export type FormattedScore = {
   pool_name?: string | null;
   pool_program?: string | null;
   pool_token_mint?: string | null;
+  // gdi-1.2 phase 3 — present on leaderboard entries (publish embeds per pool).
+  // Absent on history JSON entries (intentional — history rows are score-only).
+  client_distribution?: ClientDistribution | null;
 };
 
 export type FormattedBaseline = {

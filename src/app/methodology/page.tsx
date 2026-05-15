@@ -316,6 +316,71 @@ export default function MethodologyPage() {
         </ul>
       </section>
 
+      <section id="client-diversity" className="mt-12 scroll-mt-20">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
+          Client diversity (CDI)
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          Stake concentrated on a single validator client is a real network
+          risk — a bug in that client can take down every validator running
+          it. The Client Decentralisation Index (CDI) sits alongside GDI as
+          a companion score on a different axis.
+        </p>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          For each pool we compute the stake-weighted distribution across
+          known validator clients (Agave, AgaveBam, JitoLabs, Frankendancer,
+          Firedancer, HarmonicAgave, Rakurai, …) and report the{' '}
+          <em>effective number of clients</em> — the exponential of the
+          Shannon entropy of that distribution. A pool with all stake on
+          one client scores <code className="rounded bg-bg-muted px-1.5 py-0.5">1.0</code>;
+          a perfectly even split across N clients scores N; real distributions
+          land in between. The same metric is computed across the whole
+          active validator set as a network baseline, so each pool can be
+          read as &quot;above&quot; or &quot;below&quot; average.
+        </p>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          <strong className="text-ink">Trust model.</strong> Client labels
+          come from{' '}
+          <a
+            href="https://www.validators.app/api-documentation"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="drilldown hover:text-ink"
+          >
+            validators.app
+          </a>
+          &apos;s curated <code className="rounded bg-bg-muted px-1.5 py-0.5">software_client</code>{' '}
+          field. The <code>jito</code> flag is on-chain verifiable (validators
+          participating in Jito&apos;s tip-distribution program are detectable
+          from chain activity), but the finer distinctions between Frankendancer,
+          Firedancer, HarmonicAgave etc. rely partly on operator self-attestation
+          via the validators.app profile. We surface the labels as-is and
+          flag the trust model here for transparency.
+        </p>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          <strong className="text-ink">Not folded into GDI.</strong> CDI is
+          published as a separate score, not blended into the headline GDI.
+          Historical GDI values remain valid under <code>gdi-1.0.0</code>;
+          adding client diversity didn&apos;t reset that baseline. If we
+          later decide to combine them into a unified Decentralisation
+          Index, it will be a coordinated methodology bump with its own
+          version, not a silent shift.
+        </p>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          <strong className="text-ink">DoubleZero is shown but not scored.</strong>{' '}
+          DoubleZero is a dedicated fibre network for validators that provides
+          faster voting and block production. Most active stake runs on it,
+          and a pool that picks <em>non</em>-DZ validators effectively
+          accepts slower performance — so the pool&apos;s &quot;lever&quot;
+          there isn&apos;t symmetric with client choice. We report DZ
+          participation on the pool detail page as an operator-quality
+          signal but do not fold it into any decentralisation index.
+          Network-level concentration on DZ infrastructure is a real risk
+          worth tracking, but it lives outside the rarity-and-stake
+          framework GDI/CDI use.
+        </p>
+      </section>
+
       <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
           Version policy

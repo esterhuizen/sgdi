@@ -1,6 +1,7 @@
-// Leaderboard table. Columns: rank, pool, GDI (bold/large), country, city,
-// asn (dim sub-scores), validators, stake. GDI carries the headline weight;
-// the three sub-scores are visible but de-emphasised.
+// Leaderboard table. Columns: rank, pool, CDI (dim peer), GDI (bold/large),
+// country, city, asn (dim sub-scores), validators, stake. GDI carries the
+// headline weight; CDI sits beside it as a different-axis-different-math
+// companion. The three sub-scores are visible but de-emphasised.
 
 import Link from 'next/link';
 import { GdiLink } from '@/components/GdiLink';
@@ -34,6 +35,14 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
           <tr>
             <th className="py-3 pl-5 pr-3 font-semibold">#</th>
             <th className="py-3 pr-3 font-semibold">Pool</th>
+            <th className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell">
+              <GdiLink
+                href="/methodology#client-diversity"
+                title="CDI — Client Decentralisation Index. Click for methodology."
+              >
+                CDI
+              </GdiLink>
+            </th>
             <th className="py-3 pr-3 text-right font-semibold"><GdiLink /></th>
             <th className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell">country</th>
             <th className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell">city</th>
@@ -45,7 +54,7 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
         <tbody className="text-ink">
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={8} className="py-12 text-center text-ink-dim">
+              <td colSpan={9} className="py-12 text-center text-ink-dim">
                 No pools scored for epoch {epoch} yet. Check back after the next ingest.
               </td>
             </tr>
@@ -66,6 +75,9 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
                   {p.pool_name || fmt.addr(p.pool_address)}
                 </Link>
                 <div className="font-mono text-xs text-ink-dim">{fmt.addr(p.pool_address)}</div>
+              </td>
+              <td className="num hidden py-4 pr-3 text-right text-xs tabular-nums text-ink-dim sm:table-cell">
+                {fmt.num(p.client_distribution?.effective_clients ?? null, 2)}
               </td>
               <td className="num py-4 pr-3 text-right font-display text-xl font-bold tabular-nums">
                 {fmt.num(p.gdi, 2)}
