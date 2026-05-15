@@ -2,83 +2,61 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { loadValidatorIndex, type ValidatorIndexEntry } from '@/lib/data';
 import { GdiLink } from '@/components/GdiLink';
-import { LocationsTable, type BucketRow } from '@/components/LocationsTable';
+import { LocationsTable, type TupleRow } from '@/components/LocationsTable';
 
 export const revalidate = 60;
 
 export const metadata: Metadata = {
   title: 'Where to host for maximum stake',
   description:
-    'Rare validator locations sorted by rarity, filterable by DoubleZero support. ' +
-    'For validator operators: find the country, city, and ASN where hosting earns the most decentralisation score.',
+    'Rare validator (country, city, ASN) tuples sorted by composite rarity, ' +
+    'filterable by DoubleZero support. For validator operators: find the ' +
+    'specific hosting location where your validator earns the most ' +
+    'decentralisation score.',
 };
 
 /**
- * Aggregate the per-validator entries from validator-index.json into one row
- * per bucket (country / city / ASN). For each bucket we surface: rarity (same
- * for every validator in the bucket — pulled from any one), network share,
- * how many validators currently sit there, of which how many run DZ, and
- * total stake. Buckets without any DZ validator are still emitted; the
- * client component filters them by default.
+ * Aggregate per-validator entries from validator-index.json into one row per
+ * unique (country, city, ASN) tuple. Composite rarity = geometric mean of the
+ * three per-dim rarities (same formula GDI uses for pool scores). Only tuples
+ * with at least one validator currently present are emitted — this is what
+ * the data lets us know about; "empty" hypothetical tuples can't be surfaced.
  */
-function aggregateBuckets(
-  rows: readonly ValidatorIndexEntry[],
-  getKey: (v: ValidatorIndexEntry) => string | null,
-  getLabel: (v: ValidatorIndexEntry) => string | null,
-  getRarity: (v: ValidatorIndexEntry) => number | null,
-  getShare: (v: ValidatorIndexEntry) => number | null,
-): BucketRow[] {
-  const buckets = new Map<string, BucketRow>();
+function aggregateTuples(rows: readonly ValidatorIndexEntry[]): TupleRow[] {
+  const tuples = new Map<string, TupleRow>();
   for (const v of rows) {
-    const key = getKey(v);
-    if (!key) continue;
-    let b = buckets.get(key);
-    if (!b) {
-      b = {
+    if (!v.country || !v.city || !v.asn) continue;
+    const key = `${v.country}|${v.city}|${v.asn}`;
+    let t = tuples.get(key);
+    if (!t) {
+      t = {
         key,
-        label: getLabel(v) || key,
-        rarity: getRarity(v),
-        networkShare: getShare(v),
+        country: v.country,
+        city: v.city,
+        asnId: v.asn,
+        asnName: v.asn_name || v.asn,
+        rarityCountry: v.rarity_country,
+        rarityCity: v.rarity_city,
+        rarityAsn: v.rarity_asn,
+        composite: v.composite_rarity,
         validatorCount: 0,
         dzCount: 0,
         totalStakeSol: 0,
       };
-      buckets.set(key, b);
+      tuples.set(key, t);
     }
-    b.validatorCount += 1;
-    if (v.is_dz === true) b.dzCount += 1;
-    b.totalStakeSol += v.activated_stake_sol;
+    t.validatorCount += 1;
+    if (v.is_dz === true) t.dzCount += 1;
+    t.totalStakeSol += v.activated_stake_sol;
   }
-  return [...buckets.values()].sort((a, b) => (b.rarity ?? -Infinity) - (a.rarity ?? -Infinity));
+  return [...tuples.values()];
 }
 
 export default async function LocationsPage() {
   const idx = await loadValidatorIndex();
   const validators = idx?.validators ?? [];
 
-  const country = aggregateBuckets(
-    validators,
-    (v) => v.country,
-    (v) => v.country,
-    (v) => v.rarity_country,
-    (v) => v.network_share_country,
-  );
-  const city = aggregateBuckets(
-    validators,
-    (v) => v.city,
-    (v) => v.city,
-    (v) => v.rarity_city,
-    (v) => v.network_share_city,
-  );
-  const asn = aggregateBuckets(
-    validators,
-    (v) => v.asn,
-    (v) => v.asn_name || v.asn,
-    (v) => v.rarity_asn,
-    (v) => v.network_share_asn,
-  );
-
-  // Network-wide DZ + active counts for the context lede.
+  const tuples = aggregateTuples(validators);
   const totalActive = validators.length;
   const totalDz = validators.filter((v) => v.is_dz === true).length;
 
@@ -95,17 +73,23 @@ export default async function LocationsPage() {
         </h1>
         <p className="mt-4 text-base leading-relaxed text-ink-muted">
           Stake pools delegate to validators that improve their decentralisation
-          score. The rarest country / city / network operator buckets are where
-          a new validator can move the needle the most.
+          score. The rarest country / city / network operator combinations are
+          where a new validator can move the needle the most.
         </p>
         <p className="mt-3 text-base leading-relaxed text-ink-muted">
-          The filter below keeps you on{' '}
+          Each row below is a real (country, city, ASN) location currently
+          occupied by at least one validator. The{' '}
+          <span className="font-medium text-ink">composite rarity</span> is the
+          geometric mean of the three per-dimension rarities — the same formula
+          we use for <GdiLink />. Higher = more decentralising. Click any
+          column header to re-sort.
+        </p>
+        <p className="mt-3 text-base leading-relaxed text-ink-muted">
+          The default filter keeps only{' '}
           <span className="font-medium text-ink">DoubleZero-supported</span>{' '}
-          locations — proven by at least one existing DZ validator there — so
-          your hosting choice both maximises rarity AND keeps you on the
-          dedicated fibre network that drives voting + block-production
-          performance. Toggle it off to see the rarest locations regardless of
-          DZ availability.
+          locations — proven by at least one DZ validator already at that exact
+          spot — so your hosting pick maximises both rarity AND voting/block
+          performance. Toggle off to see the long tail.
         </p>
       </header>
 
@@ -125,15 +109,17 @@ export default async function LocationsPage() {
               </div>
             </div>
             <div className="surface p-4">
-              <div className="text-xs uppercase tracking-wider text-ink-dim">Rarity formula</div>
+              <div className="text-xs uppercase tracking-wider text-ink-dim">Composite formula</div>
               <div className="mt-1 text-sm text-ink">
-                <code className="rounded bg-bg-muted px-1.5 py-0.5">−ln(network_share)</code>
+                <code className="rounded bg-bg-muted px-1.5 py-0.5">
+                  ∛(r_country · r_city · r_asn)
+                </code>
               </div>
-              <div className="text-xs text-ink-dim">higher = rarer (more decentralising)</div>
+              <div className="text-xs text-ink-dim">geometric mean of per-dim rarities</div>
             </div>
           </div>
 
-          <LocationsTable country={country} city={city} asn={asn} />
+          <LocationsTable tuples={tuples} />
 
           <section className="mt-12 max-w-3xl">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
@@ -141,27 +127,40 @@ export default async function LocationsPage() {
             </h2>
             <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-relaxed text-ink-muted">
               <li>
-                <strong className="text-ink">Rarity</strong> is{' '}
-                <code className="rounded bg-bg-muted px-1 py-0.5">−ln(network_share)</code>{' '}
-                — the same number that feeds <GdiLink />. A bucket holding 1% of
-                stake has rarity ≈ 4.6; a bucket holding 30% has rarity ≈ 1.2.
+                <strong className="text-ink">Composite</strong> is the headline
+                rarity — geometric mean of the country, city, and ASN rarities
+                for that exact tuple. Sort by this for the strongest overall
+                decentralisation candidates.
               </li>
               <li>
-                <strong className="text-ink">On DZ</strong> counts how many
-                existing validators at this location have DoubleZero enabled.
-                A column value of <span className="text-success">1+</span> proves
-                DZ coverage is feasible there; <span className="text-ink-dim">0</span>{' '}
-                doesn&apos;t prove it&apos;s impossible — just that nobody&apos;s
-                done it yet.
+                The small number under each Country/City/ASN cell is that
+                dimension&apos;s rarity in isolation —{' '}
+                <code className="rounded bg-bg-muted px-1 py-0.5">−ln(network_share)</code>.
+                Click the column header to sort by that dimension instead of
+                the composite.
               </li>
               <li>
-                <strong className="text-ink">Total stake</strong> at the location
-                gives a feel for whether it&apos;s already capacity-constrained.
-                Lower stake + higher rarity = the cleanest opportunity.
+                <strong className="text-ink">On DZ</strong>{' '}
+                <span className="text-success">≥ 1</span> means at least one
+                existing validator at this exact (country, city, ASN) tuple has
+                DoubleZero enabled — proves the location can support DZ.{' '}
+                <span className="text-ink-dim">0</span> doesn&apos;t prove
+                infeasibility, just that nobody&apos;s tried it yet.
               </li>
               <li>
-                Labels come from <a href="https://www.validators.app/api-documentation" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">validators.app</a>{' '}
-                and <a href="https://api.stakewiz.com" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Stakewiz</a>.
+                <strong className="text-ink">Validators / Stake</strong> show
+                how crowded the location already is. Lower validator count +
+                higher composite = the cleanest opportunity.
+              </li>
+              <li>
+                Labels come from{' '}
+                <a href="https://www.validators.app/api-documentation" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">
+                  validators.app
+                </a>{' '}
+                and{' '}
+                <a href="https://api.stakewiz.com" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">
+                  Stakewiz
+                </a>.
                 See <Link href="/methodology" className="drilldown hover:text-ink">methodology</Link>{' '}
                 for the full data lineage.
               </li>
