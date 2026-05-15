@@ -53,7 +53,7 @@ export default async function Image() {
     data?.pools
       ?.filter((p) => p.gdi != null && (p.total_stake_sol ?? 0) >= DEFAULT_TVL_FLOOR_SOL)
       .sort((a, b) => (b.gdi ?? 0) - (a.gdi ?? 0))
-      .slice(0, 5) ?? [];
+      .slice(0, 4) ?? [];
   const filteredCount = (data?.pools ?? []).filter(
     (p) => p.gdi != null && (p.total_stake_sol ?? 0) >= DEFAULT_TVL_FLOOR_SOL,
   ).length;
@@ -122,8 +122,8 @@ export default async function Image() {
                 marginTop: 16,
               }}
             >
-              Top 5 pools by GDI · epoch {data.epoch} ·{' '}
-              {sortedPools.length === 5 ? `${filteredCount} pools tracked` : ''}
+              Top 4 pools by GDI · epoch {data.epoch} ·{' '}
+              {sortedPools.length === 4 ? `${filteredCount} pools tracked` : ''}
             </div>
           ) : (
             <div
