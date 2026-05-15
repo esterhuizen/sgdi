@@ -5,6 +5,7 @@ import { loadPoolLatest, loadPoolHistory, loadNetworkBaseline, loadLeaderboard }
 import { DEFAULT_TVL_FLOOR_SOL } from '@/lib/leaderboard-config';
 import { GdiLink } from '@/components/GdiLink';
 import { TrendChart } from '@/components/TrendChart';
+import { ClientDiversityCard } from '@/components/ClientDiversityCard';
 
 export const revalidate = 60;
 
@@ -160,21 +161,12 @@ export default async function PoolDetailPage({ params }: Props) {
           Phase 1: surfaced as separate metrics, NOT folded into headline GDI. */}
       {latest.client_distribution && (
         <section className="mt-4 grid gap-4 md:grid-cols-2">
-          <div className="surface p-5">
-            <div className="text-xs uppercase tracking-wider text-ink-dim">Effective clients</div>
-            <div className="num mt-2 text-2xl text-ink">
-              {latest.client_distribution.effective_clients != null
-                ? fmt.num(latest.client_distribution.effective_clients, 2)
-                : '—'}
-            </div>
-            <div className="text-xs text-ink-dim">
-              client-diversity score — as-if N equal clients (
-              <Link href="/methodology#client-diversity" className="drilldown hover:text-ink">
-                see breakdown
-              </Link>
-              )
-            </div>
-          </div>
+          <ClientDiversityCard
+            topClients={latest.client_distribution.by_client.slice(0, 3).map((c) => ({
+              client: c.client,
+              shareLabel: fmt.pct(c.stake_share),
+            }))}
+          />
           <div className="surface p-5">
             <div className="text-xs uppercase tracking-wider text-ink-dim">DoubleZero</div>
             <div className="num mt-2 text-2xl text-ink">
