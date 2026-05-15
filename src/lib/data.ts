@@ -60,6 +60,9 @@ export type Leaderboard = {
   last_published_at: string;
   methodology_version: string;
   network_baseline: FormattedBaseline | null;
+  // Network-wide client distribution for baseline comparison on pool pages.
+  // Optional for backwards compat with older published JSON.
+  network_client_distribution?: ClientDistribution | null;
   pools: FormattedScore[];
 };
 

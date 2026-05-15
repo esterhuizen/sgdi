@@ -14,11 +14,20 @@ export type ClientDiversityRow = {
   shareLabel: string;
 };
 
-export function ClientDiversityCard({ topClients }: { topClients: ClientDiversityRow[] }) {
-  const [expanded, setExpanded] = useState(false);
-  const top = topClients[0];
+type Props = {
+  /** Effective clients (exp Shannon entropy) for this pool. */
+  poolScore: number | null;
+  /** Same metric across the whole active validator set. */
+  networkScore: number | null;
+  topClients: ClientDiversityRow[];
+};
 
-  if (!top) {
+const fmt2 = (n: number) => n.toFixed(2);
+
+export function ClientDiversityCard({ poolScore, networkScore, topClients }: Props) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (poolScore == null) {
     return (
       <div className="surface p-5">
         <div className="text-xs uppercase tracking-wider text-ink-dim">Client diversity</div>
@@ -27,6 +36,13 @@ export function ClientDiversityCard({ topClients }: { topClients: ClientDiversit
       </div>
     );
   }
+
+  const comparison =
+    networkScore != null
+      ? poolScore >= networkScore
+        ? `above network avg (${fmt2(networkScore)})`
+        : `below network avg (${fmt2(networkScore)})`
+      : 'higher = more diverse';
 
   return (
     <div className="surface p-5">
@@ -45,11 +61,8 @@ export function ClientDiversityCard({ topClients }: { topClients: ClientDiversit
 
       {!expanded ? (
         <>
-          <div className="num mt-2 text-2xl text-ink">
-            {top.shareLabel}{' '}
-            <span className="text-lg font-normal text-ink-muted">{top.client}</span>
-          </div>
-          <div className="mt-1 text-xs text-ink-dim">share on dominant client</div>
+          <div className="num mt-2 text-2xl text-ink">{fmt2(poolScore)}</div>
+          <div className="mt-1 text-xs text-ink-dim">{comparison}</div>
         </>
       ) : (
         <ol className="mt-2 space-y-1 text-sm">

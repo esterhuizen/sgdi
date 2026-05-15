@@ -258,11 +258,25 @@ async function main() {
     (s) => !(s.gdi_composite != null && (s.validator_count ?? 0) >= 1),
   );
 
+  // Network-wide client distribution — uses the same "active voting" set
+  // as the existing network baseline (not delinquent && activated_stake > 0).
+  // Lets pool cards compare against a network reference.
+  const networkValidatorsForClient = storage
+    .listAllValidators()
+    .filter((v) => v.delinquent !== 1 && (v.activated_stake_lamports ?? 0) > 0)
+    .map((v) => ({
+      pubkey: v.validator_pubkey,
+      stake_sol: Number(v.activated_stake_lamports ?? 0) / 1e9,
+      row: v,
+    }));
+  const networkClientDistribution = computePoolClientDistribution(networkValidatorsForClient);
+
   const leaderboard = {
     epoch: latestEpoch,
     last_published_at: new Date().toISOString(),
     methodology_version: METHODOLOGY_VERSION,
     network_baseline: latestBaseline ? formatBaseline(latestBaseline) : null,
+    network_client_distribution: networkClientDistribution,
     pools: scoredPools.map((s) => {
       const meta = poolMeta.get(s.pool_address);
       return {

@@ -162,6 +162,8 @@ export default async function PoolDetailPage({ params }: Props) {
       {latest.client_distribution && (
         <section className="mt-4 grid gap-4 md:grid-cols-2">
           <ClientDiversityCard
+            poolScore={latest.client_distribution.effective_clients}
+            networkScore={leaderboard?.network_client_distribution?.effective_clients ?? null}
             topClients={latest.client_distribution.by_client.slice(0, 3).map((c) => ({
               client: c.client,
               shareLabel: fmt.pct(c.stake_share),
