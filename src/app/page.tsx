@@ -132,6 +132,12 @@ export default async function HomePage() {
               >
                 Validator lookup →
               </Link>
+              <Link
+                href="/locations"
+                className="drilldown text-ink-muted hover:text-ink"
+              >
+                Where to host →
+              </Link>
               <a
                 href="/gdi/leaderboard-latest.json"
                 target="_blank"

@@ -141,6 +141,9 @@ export type ValidatorIndexEntry = {
   composite_rarity: number | null;
   rank: number | null;
   percentile: number | null;
+  // Operational flags surfaced for the /locations dashboard.
+  is_dz?: boolean | null;
+  is_jito?: boolean | null;
 };
 
 export type ValidatorIndex = {

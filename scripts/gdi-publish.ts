@@ -416,6 +416,9 @@ async function main() {
     rarity_city: number | null;
     rarity_asn: number | null;
     composite_rarity: number | null;
+    // gdi-1.2 phase 1 — operational flags powering /locations dashboard.
+    is_dz: boolean | null;
+    is_jito: boolean | null;
   };
 
   const RARITY_FLOOR = 1e-9;
@@ -457,6 +460,8 @@ async function main() {
       rarity_city: null,
       rarity_asn: null,
       composite_rarity: null,
+      is_dz: v.is_dz == null ? null : v.is_dz === 1,
+      is_jito: v.is_jito == null ? null : v.is_jito === 1,
     });
   }
 
