@@ -148,6 +148,11 @@ export type ValidatorRow = {
   activated_stake_lamports: number | null;
   delinquent: number | null;       // 0 / 1; null = unknown
   image_url: string | null;
+  // Client diversity (gdi-1.2 phase 1) — sourced from validators.app.
+  client_name: string | null;      // e.g. "Agave", "JitoLabs", "Frankendancer"
+  client_version: string | null;   // e.g. "3.1.13", "0.820.30113"
+  is_jito: number | null;          // 0 / 1; null = unknown
+  is_dz: number | null;            // 0 / 1; null = unknown — DoubleZero network participation
 };
 
 export type PoolSnapshot = {
@@ -229,6 +234,12 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     addColumn('validators', 'activated_stake_lamports', 'INTEGER');
     addColumn('validators', 'delinquent',               'INTEGER');
     addColumn('validators', 'image_url',                'TEXT');
+    // gdi-1.2 phase 1 — client diversity + operational columns. Additive;
+    // existing installs migrate forward, fields stay null until next ingest fills them.
+    addColumn('validators', 'client_name',              'TEXT');
+    addColumn('validators', 'client_version',           'TEXT');
+    addColumn('validators', 'is_jito',                  'INTEGER');
+    addColumn('validators', 'is_dz',                    'INTEGER');
   }
 
   const stmt = {
@@ -262,12 +273,14 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         (validator_pubkey, identity_pubkey, identity_name, country, city, asn, asn_name, datacenter,
          country_source, city_source, asn_source, metadata_refreshed_at,
          stakewiz_wiz_score, stakewiz_city_concentration, stakewiz_asn_concentration, stakewiz_refreshed_at,
-         activated_stake_lamports, delinquent, image_url)
+         activated_stake_lamports, delinquent, image_url,
+         client_name, client_version, is_jito, is_dz)
       VALUES
         (@validator_pubkey, @identity_pubkey, @identity_name, @country, @city, @asn, @asn_name, @datacenter,
          @country_source, @city_source, @asn_source, @metadata_refreshed_at,
          @stakewiz_wiz_score, @stakewiz_city_concentration, @stakewiz_asn_concentration, @stakewiz_refreshed_at,
-         @activated_stake_lamports, @delinquent, @image_url)
+         @activated_stake_lamports, @delinquent, @image_url,
+         @client_name, @client_version, @is_jito, @is_dz)
       ON CONFLICT(validator_pubkey) DO UPDATE SET
         identity_pubkey             = COALESCE(excluded.identity_pubkey,             validators.identity_pubkey),
         identity_name               = COALESCE(excluded.identity_name,               validators.identity_name),
@@ -286,7 +299,13 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         stakewiz_refreshed_at       = COALESCE(excluded.stakewiz_refreshed_at,       validators.stakewiz_refreshed_at),
         activated_stake_lamports    = COALESCE(excluded.activated_stake_lamports,    validators.activated_stake_lamports),
         delinquent                  = COALESCE(excluded.delinquent,                  validators.delinquent),
-        image_url                   = COALESCE(excluded.image_url,                   validators.image_url)
+        image_url                   = COALESCE(excluded.image_url,                   validators.image_url),
+        -- Client fields: refresh on every ingest (clients change more often than
+        -- geo). excluded.* wins outright so operator-attestation updates flow through.
+        client_name                 = COALESCE(excluded.client_name,                 validators.client_name),
+        client_version              = COALESCE(excluded.client_version,              validators.client_version),
+        is_jito                     = COALESCE(excluded.is_jito,                     validators.is_jito),
+        is_dz                       = COALESCE(excluded.is_dz,                       validators.is_dz)
     `),
     getValidator: db.prepare(`SELECT * FROM validators WHERE validator_pubkey = ?`),
     listAllValidators: db.prepare(`SELECT * FROM validators`),

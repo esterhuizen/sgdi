@@ -79,6 +79,11 @@ function formatValidator(v: ValidatorRow) {
     asn: v.asn,
     asn_name: v.asn_name,
     datacenter: v.datacenter,
+    // Client diversity fields (gdi-1.2 phase 1) — sourced from validators.app.
+    client_name: v.client_name,
+    client_version: v.client_version,
+    is_jito: v.is_jito === null ? null : v.is_jito === 1,
+    is_dz: v.is_dz === null ? null : v.is_dz === 1,
     sources: {
       country: v.country_source,
       city: v.city_source,
@@ -91,6 +96,96 @@ function formatValidator(v: ValidatorRow) {
       refreshed_at: v.stakewiz_refreshed_at,
     },
     metadata_refreshed_at: v.metadata_refreshed_at,
+  };
+}
+
+/**
+ * Stake-weighted client breakdown for one pool. Returns a structured
+ * summary suitable for embedding in the published JSON — caller decides
+ * how to display.
+ *
+ * - `by_client`: per-label tallies (stake_sol, stake_share, validator_count)
+ * - `operational`: jito / DoubleZero participation shares (stake-weighted)
+ * - `effective_clients`: exp(Shannon entropy) — interpretable as "as-if N
+ *   equal clients". 1.0 = full concentration; max = # distinct clients.
+ * - `unclassified`: stake whose validator has no client_name (data gap)
+ *
+ * Stake-weighted (not validator-count): pool risk lives in dollars,
+ * not in headcount. Documented choice for gdi-1.2.
+ */
+type ClientDistribution = {
+  by_client: { client: string; stake_sol: number; stake_share: number; validator_count: number }[];
+  operational: { jito_share: number; dz_share: number };
+  effective_clients: number | null;
+  unclassified: { stake_sol: number; stake_share: number };
+};
+
+function computePoolClientDistribution(
+  validatorStakeSol: { pubkey: string; stake_sol: number; row: ValidatorRow | undefined }[],
+): ClientDistribution {
+  const total = validatorStakeSol.reduce((a, v) => a + v.stake_sol, 0);
+  if (total <= 0) {
+    return {
+      by_client: [],
+      operational: { jito_share: 0, dz_share: 0 },
+      effective_clients: null,
+      unclassified: { stake_sol: 0, stake_share: 0 },
+    };
+  }
+
+  // Per-client tally.
+  const tally = new Map<string, { stake: number; count: number }>();
+  let unclassifiedStake = 0;
+  let jitoStake = 0;
+  let dzStake = 0;
+
+  for (const v of validatorStakeSol) {
+    const label = v.row?.client_name ?? null;
+    if (!label) {
+      unclassifiedStake += v.stake_sol;
+    } else {
+      const cur = tally.get(label) ?? { stake: 0, count: 0 };
+      cur.stake += v.stake_sol;
+      cur.count += 1;
+      tally.set(label, cur);
+    }
+    if (v.row?.is_jito === 1) jitoStake += v.stake_sol;
+    if (v.row?.is_dz === 1) dzStake += v.stake_sol;
+  }
+
+  const by_client = [...tally.entries()]
+    .map(([client, agg]) => ({
+      client,
+      stake_sol: agg.stake,
+      stake_share: agg.stake / total,
+      validator_count: agg.count,
+    }))
+    .sort((a, b) => b.stake_share - a.stake_share);
+
+  // Effective clients = exp(Shannon entropy). Uses only classified stake;
+  // unclassified is reported separately, not folded into the distribution.
+  const classifiedTotal = total - unclassifiedStake;
+  let effective_clients: number | null = null;
+  if (classifiedTotal > 0 && by_client.length > 0) {
+    let entropy = 0;
+    for (const row of by_client) {
+      const p = row.stake_sol / classifiedTotal;
+      if (p > 0) entropy -= p * Math.log(p);
+    }
+    effective_clients = Math.exp(entropy);
+  }
+
+  return {
+    by_client,
+    operational: {
+      jito_share: jitoStake / total,
+      dz_share: dzStake / total,
+    },
+    effective_clients,
+    unclassified: {
+      stake_sol: unclassifiedStake,
+      stake_share: unclassifiedStake / total,
+    },
   };
 }
 
@@ -137,6 +232,20 @@ async function main() {
   const pools = storage.listTrackedPools();
   const poolMeta = new Map(pools.map((p) => [p.pool_address, p]));
 
+  // Pre-compute client distribution per pool from the latest epoch's
+  // snapshots — used in both leaderboard-latest.json (per-pool entry) and
+  // per-pool latest.json. Stake-weighted; see computePoolClientDistribution.
+  const clientDistByPool = new Map<string, ClientDistribution>();
+  for (const score of latestScores) {
+    const snaps = storage.listSnapshotsForPoolEpoch(latestEpoch, score.pool_address);
+    const enriched = snaps.map((s) => ({
+      pubkey: s.validator_pubkey,
+      stake_sol: Number(s.stake_lamports) / 1e9,
+      row: storage.getValidator(s.validator_pubkey),
+    }));
+    clientDistByPool.set(score.pool_address, computePoolClientDistribution(enriched));
+  }
+
   // Leaderboard inclusion rule: any pool with a real GDI and at least one
   // validator. Single-validator pools are kept (GDI is mathematically defined
   // for n=1 — it's the rarity of that one bucket); they rank naturally. Pools
@@ -161,6 +270,7 @@ async function main() {
         pool_name: meta?.pool_name ?? null,
         pool_program: meta?.pool_program ?? null,
         pool_token_mint: meta?.pool_token_mint ?? null,
+        client_distribution: clientDistByPool.get(s.pool_address) ?? null,
       };
     }),
     tracked_but_unscored: trackedButUnscored.map((s) => {
@@ -206,6 +316,12 @@ async function main() {
         asn: v?.asn ?? null,
         asn_name: v?.asn_name ?? null,
         wiz_score: v?.stakewiz_wiz_score ?? null,
+        // Client diversity surface — inline so frontend pool page can render
+        // per-validator without a second lookup.
+        client_name: v?.client_name ?? null,
+        client_version: v?.client_version ?? null,
+        is_jito: v?.is_jito === null || v?.is_jito === undefined ? null : v.is_jito === 1,
+        is_dz: v?.is_dz === null || v?.is_dz === undefined ? null : v.is_dz === 1,
       };
     });
 
@@ -223,6 +339,9 @@ async function main() {
       // (single-validator pools, etc. — appear in tracked_but_unscored).
       rank: rankByAddress.get(pool.pool_address) ?? null,
       total_ranked: totalRanked,
+      // Stake-weighted client breakdown. Phase 1: published but not folded
+      // into headline GDI. See /methodology.
+      client_distribution: clientDistByPool.get(pool.pool_address) ?? null,
       validators: validatorsInline,
     });
     await atomicWriteJson(join(poolDir, 'history.json'), {

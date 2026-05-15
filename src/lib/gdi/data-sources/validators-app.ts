@@ -1,10 +1,17 @@
 // Validators.app REST client (cross-reference for validator metadata).
 //
-// Used only as a tiebreaker / fallback when Stakewiz disagrees on country /
-// city / ASN. Same once-per-refresh-cycle cadence as Stakewiz.
+// Used as:
+//   - Cross-reference / fallback for country / city / ASN (Stakewiz primary).
+//   - Primary source for `software_client` — validators.app maintains a
+//     curated label per validator (Agave / AgaveBam / JitoLabs / Frankendancer
+//     / Firedancer / HarmonicAgave / Rakurai / …). The label is partially
+//     on-chain-verifiable (jito flag) and partially operator-attested for
+//     non-Jito distinctions. We trust it as-is and document the model on
+//     /methodology.
 //
 // API docs: https://www.validators.app/api-documentation
-// Requires VALIDATORS_APP_TOKEN in env (header: "Token <token>").
+// VALIDATORS_APP_TOKEN is optional — the read endpoints accept anonymous
+// requests with conservative rate limits. Set the token for higher limits.
 
 import type { ModuleLogger } from '../logger.ts';
 
@@ -24,6 +31,16 @@ export type ValidatorsAppValidator = {
   data_center_concentration_score: number | null;
   data_center_host: string | null;
   data_center_key: string | null;
+  /** Validators.app's curated client label (e.g. "Agave", "JitoLabs", "Frankendancer"). null when unclassified. */
+  software_client: string | null;
+  /** Integer enum the API also publishes alongside the label — kept for future cross-checking. */
+  software_client_id: number | null;
+  /** Self-reported version string from gossip (e.g. "3.1.13"). */
+  software_version: string | null;
+  /** Whether the validator participates in Jito's MEV system (on-chain detectable). */
+  jito: boolean | null;
+  /** Whether the validator participates in DoubleZero's dedicated-fibre network. */
+  is_dz: boolean | null;
 };
 
 export class ValidatorsAppError extends Error {
@@ -47,7 +64,11 @@ export function createValidatorsApp(opts: {
   const logger = opts.logger;
 
   return {
-    /** Was the client configured with a usable token? */
+    /**
+     * Whether a token is present. The adapter functions without one (read
+     * endpoints accept anonymous requests), but flags that we're on the
+     * stricter rate-limit tier so callers can decide.
+     */
     isConfigured(): boolean {
       return token.length > 0;
     },
@@ -56,23 +77,20 @@ export function createValidatorsApp(opts: {
      * Fetch every validator on the chosen network. The API returns up to
      * 9999 entries in a single page when `?per_page=9999` is set. We use
      * that to avoid pagination on a low-volume daily/weekly job.
+     *
+     * Works anonymously if no token is configured (slower rate limits).
      */
     async fetchAllValidators(): Promise<ValidatorsAppValidator[]> {
-      if (!token) {
-        throw new ValidatorsAppError(
-          'VALIDATORS_APP_TOKEN not set — adapter cannot run',
-          null,
-        );
-      }
       const url = `${BASE_URL}/validators/${network}.json?per_page=9999`;
       const startedAt = Date.now();
+      const headers: Record<string, string> = {
+        'user-agent': 'sgdi/0.1 (+https://sgdi.app)',
+      };
+      if (token) headers.Token = token;
       let res: Response;
       try {
         res = await fetch(url, {
-          headers: {
-            Token: token,
-            'user-agent': 'sgdi/0.1 (+https://sgdi.app)',
-          },
+          headers,
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (e) {
@@ -122,6 +140,11 @@ export function createValidatorsApp(opts: {
           data_center_concentration_score: numberOrNull(r.data_center_concentration_score),
           data_center_host: stringOrNull(r.data_center_host),
           data_center_key: stringOrNull(r.data_center_key),
+          software_client: stringOrNull(r.software_client),
+          software_client_id: numberOrNull(r.software_client_id),
+          software_version: stringOrNull(r.software_version),
+          jito: typeof r.jito === 'boolean' ? r.jito : null,
+          is_dz: typeof r.is_dz === 'boolean' ? r.is_dz : null,
         }))
         .filter((v) => v.vote_account || v.account);
 

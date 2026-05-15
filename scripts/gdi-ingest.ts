@@ -270,15 +270,19 @@ async function main() {
     log.error('stakewiz.fetch.failed', { error: errMessage(e) });
   }
 
+  // Validators.app — read endpoints accept anonymous requests, so we always
+  // fetch. Setting VALIDATORS_APP_TOKEN gets the higher rate-limit tier.
+  // Primary source for `software_client` labels (Agave / Frankendancer /
+  // JitoLabs / …) and the `jito` / `is_dz` operational flags.
   let vaData: Awaited<ReturnType<typeof validatorsApp.fetchAllValidators>> = [];
-  if (validatorsApp.isConfigured()) {
-    try {
-      vaData = await validatorsApp.fetchAllValidators();
-    } catch (e) {
-      log.warn('validators_app.fetch.failed', { error: errMessage(e) });
-    }
-  } else {
-    log.info('validators_app.skipped', { reason: 'no_token_configured' });
+  try {
+    vaData = await validatorsApp.fetchAllValidators();
+    log.info('validators_app.fetched', {
+      count: vaData.length,
+      authenticated: validatorsApp.isConfigured(),
+    });
+  } catch (e) {
+    log.warn('validators_app.fetch.failed', { error: errMessage(e) });
   }
 
   const stakewizMap = new Map(stakewizData.map((v) => [v.vote_identity, v]));

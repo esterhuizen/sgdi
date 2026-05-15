@@ -119,6 +119,15 @@ export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
         sw?.activated_stake != null ? Math.floor(sw.activated_stake * 1e9) : null,
       delinquent: sw?.delinquent != null ? (sw.delinquent ? 1 : 0) : null,
       image_url: sw?.image ?? null,
+      // Client diversity (gdi-1.2 phase 1). Validators.app is the only source
+      // with a curated `software_client` label (Agave / JitoLabs / Frankendancer
+      // / Firedancer / HarmonicAgave / Rakurai / …). For operational flags
+      // (is_jito, is_dz) validators.app is also authoritative — both are
+      // partially on-chain-verifiable from validator behaviour.
+      client_name: va?.software_client ?? null,
+      client_version: va?.software_version ?? null,
+      is_jito: va?.jito != null ? (va.jito ? 1 : 0) : null,
+      is_dz: va?.is_dz != null ? (va.is_dz ? 1 : 0) : null,
     });
   }
 
