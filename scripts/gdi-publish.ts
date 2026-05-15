@@ -23,6 +23,7 @@
 //                            /var/lib/sgdi/published in prod)
 
 import { writeFile, mkdir, rename } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { adhocLogger } from '../src/lib/gdi/logger.ts';
 import { openStorage, type ValidatorRow, type PoolScore, type NetworkBaseline } from '../src/lib/gdi/storage.ts';
@@ -305,7 +306,17 @@ async function main() {
     }),
   };
   await atomicWriteJson(join(OUTPUT_DIR, 'leaderboard-latest.json'), leaderboard);
-  await atomicWriteJson(join(OUTPUT_DIR, `leaderboard-${latestEpoch}.json`), leaderboard);
+  // Per-epoch file is write-once: first publish of an epoch freezes its
+  // ranking snapshot, subsequent publishes within the same epoch don't touch
+  // it. Consumers (e.g. the auto-poster) get a stable "start-of-epoch" view
+  // that's independent of intra-epoch ingest re-runs.
+  const perEpochPath = join(OUTPUT_DIR, `leaderboard-${latestEpoch}.json`);
+  if (!existsSync(perEpochPath)) {
+    await atomicWriteJson(perEpochPath, leaderboard);
+    log.info('publish.epoch_snapshot_frozen', { epoch: latestEpoch, path: perEpochPath });
+  } else {
+    log.debug('publish.epoch_snapshot_kept', { epoch: latestEpoch });
+  }
 
   // 4. per-pool latest + history
   // Rank lookup: scoredPools is already sorted by GDI desc; pool's rank = index + 1.
