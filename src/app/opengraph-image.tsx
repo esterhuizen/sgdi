@@ -189,23 +189,8 @@ export default async function Image() {
               <div style={{ width: 60, display: 'flex', color: C.inkDim, fontWeight: 600 }}>
                 {i + 1}
               </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ display: 'flex', fontWeight: 600, color: C.ink }}>
-                  {p.pool_name || fmt.truncAddr(p.pool_address)}
-                </div>
-                {p.pool_name && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      fontSize: 16,
-                      color: C.inkDim,
-                      marginTop: 4,
-                      fontFamily: 'monospace',
-                    }}
-                  >
-                    {fmt.truncAddr(p.pool_address)}
-                  </div>
-                )}
+              <div style={{ flex: 1, display: 'flex', fontWeight: 600, color: C.ink }}>
+                {p.pool_name || fmt.truncAddr(p.pool_address)}
               </div>
               <div
                 style={{
