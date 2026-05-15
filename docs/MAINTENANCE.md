@@ -7,6 +7,8 @@ on this codebase, read this first.
 
 ## Deployment paths
 
+### Production (gdindex.app)
+
 - **Production releases live at** `/var/lib/sgdi/www/releases/<stamp>-<sha>/`.
   `current` symlink at `/var/www/sgdi/current` points at the active one.
 - **systemd service**: `sgdi.service` (port 4400, behind nginx). Runs the
@@ -17,6 +19,63 @@ on this codebase, read this first.
 - **Published JSON**: `/var/lib/sgdi/published/` (served by nginx at `/gdi/*`).
   `SGDI_PUBLISHED_DIR` env var.
 - **Log dir**: `/var/lib/sgdi/logs/runs-YYYY-MM-DD.jsonl` (one file per UTC day).
+
+### Staging (test.gdindex.app)
+
+- **Staging releases at** `/var/www/sgdi-staging/releases/<stamp>-<sha>/`.
+  `current` symlink at `/var/www/sgdi-staging/current`.
+- **systemd service**: `sgdi-staging.service` (port 4401). Same hardening
+  template as prod, runs as `definity` user.
+- **Shares with prod**: published JSON (`/var/lib/sgdi/published/`) and DB
+  (`/var/lib/sgdi/gdi.db`). One ingest cycle feeds both sites.
+- **Cloudflare**: `test.gdindex.app` is **DNS-only** (grey-cloud), not
+  proxied — staging traffic hits origin directly. The TLS cert is a
+  separate Let's Encrypt cert at `/etc/letsencrypt/live/test.gdindex.app/`.
+- **`X-Robots-Tag: noindex, nofollow`** is set on staging responses so
+  search engines don't index it.
+
+#### Staging deploy workflow
+
+```sh
+# Deploy a specific branch to staging:
+sudo -u definity /var/www/sgdi-staging/deploy-staging.sh feature-branch
+
+# Deploy main (default):
+sudo -u definity /var/www/sgdi-staging/deploy-staging.sh
+
+# Or run directly from the repo:
+sudo -u definity /home/ubuntu/build/sgdi/deploy/deploy-staging.sh <ref>
+```
+
+Typical flow: edit → push to branch → deploy-staging.sh → verify on
+`https://test.gdindex.app` → merge to main → `deploy.sh` to ship prod.
+
+#### When the shared-data assumption is risky
+
+Staging and prod **share** the published JSON + DB. So most code changes
+(UI, layout, copy, components, OG images) are safe — staging changes only
+the rendering, both sites read the same data.
+
+⚠️ These categories of changes WILL affect prod data when deployed (even
+to staging), because they modify the ingest/publish output that both
+sites read:
+
+- `scripts/gdi-ingest.ts` — pool universe / scoring inputs / TVL filter
+- `scripts/gdi-publish.ts` — JSON schema / filtering / rank computation
+- `src/lib/gdi/scoring.ts` — methodology
+- `config/pools-watchlist.json` — display names (resolved server-side)
+- Schema migrations to `gdi.db`
+
+For those: dry-run with a fixture JSON, OR deploy to staging+prod
+together knowing both sites flip atomically. There's currently no
+"staging-only data" path. (If we add one later, isolate by env-var:
+`SGDI_PUBLISHED_DIR=/var/lib/sgdi-staging/published` and run a parallel
+ingest writing there.)
+
+Note: the prod `gdi-ingest.service` runs from
+`/var/www/sgdi/current/scripts/gdi-ingest.ts` — staging deploys do
+NOT change which ingest code runs. To test ingest changes, the prod
+release must be updated (which means: merge to main, deploy prod).
 
 ## Force re-ingest the current epoch
 
