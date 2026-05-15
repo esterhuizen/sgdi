@@ -46,12 +46,14 @@ function applyFilters(rows: BucketRow[], dzOnly: boolean): BucketRow[] {
 }
 
 function Section({
+  anchorId,
   title,
   unit,
   rows,
   showAll,
   onToggleShowAll,
 }: {
+  anchorId: string;
   title: string;
   unit: string;
   rows: BucketRow[];
@@ -60,7 +62,7 @@ function Section({
 }) {
   const visible = showAll ? rows : rows.slice(0, SECTION_LIMIT);
   return (
-    <section className="mt-10 first:mt-0">
+    <section id={anchorId} className="mt-10 scroll-mt-20 first:mt-0">
       <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
         {title}
       </h2>
@@ -147,7 +149,31 @@ export function LocationsTable({ country, city, asn }: Props) {
 
   return (
     <>
-      <div className="mt-8 flex items-center gap-3">
+      {/* Jump-to pills + filter — up-front so first-time visitors see all three
+          dimensions are available without having to scroll. */}
+      <div className="mt-8 flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-xs uppercase tracking-wider text-ink-dim">Jump to:</span>
+        <a
+          href="#country"
+          className="rounded-full border border-ring px-3 py-1 text-ink-muted transition hover:border-ink hover:text-ink"
+        >
+          Country
+        </a>
+        <a
+          href="#city"
+          className="rounded-full border border-ring px-3 py-1 text-ink-muted transition hover:border-ink hover:text-ink"
+        >
+          City
+        </a>
+        <a
+          href="#asn"
+          className="rounded-full border border-ring px-3 py-1 text-ink-muted transition hover:border-ink hover:text-ink"
+        >
+          ASN
+        </a>
+      </div>
+
+      <div className="mt-4 flex items-center gap-3">
         <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -163,6 +189,7 @@ export function LocationsTable({ country, city, asn }: Props) {
       </div>
 
       <Section
+        anchorId="country"
         title="Country"
         unit="country"
         rows={filteredCountry}
@@ -170,6 +197,7 @@ export function LocationsTable({ country, city, asn }: Props) {
         onToggleShowAll={() => setShowAllCountry((v) => !v)}
       />
       <Section
+        anchorId="city"
         title="City"
         unit="city"
         rows={filteredCity}
@@ -177,6 +205,7 @@ export function LocationsTable({ country, city, asn }: Props) {
         onToggleShowAll={() => setShowAllCity((v) => !v)}
       />
       <Section
+        anchorId="asn"
         title="ASN"
         unit="ASN"
         rows={filteredAsn}
