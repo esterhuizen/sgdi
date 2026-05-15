@@ -12,8 +12,11 @@ import { DEFAULT_TVL_FLOOR_SOL } from '@/lib/leaderboard-config';
 export const runtime = 'nodejs';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
-// Re-render at most every 60s — matches the page revalidate.
-export const revalidate = 60;
+// Render per-request: build-time prerender can't see /var/lib/sgdi/published,
+// and ISR doesn't re-run for ImageResponse routes — so a static prerender
+// would lock in the empty state. CDN cache-control header below handles
+// the actual caching at the edge.
+export const dynamic = 'force-dynamic';
 export const alt =
   'Solana Stake Pool Decentralisation Index — every pool ranked by where its stake actually lives.';
 
