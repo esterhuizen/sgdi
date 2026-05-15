@@ -71,6 +71,19 @@ export type PoolValidator = {
   asn: string | null;
   asn_name: string | null;
   wiz_score: number | null;
+  // gdi-1.2 phase 1 fields — present when validators.app classifies the validator
+  client_name?: string | null;
+  client_version?: string | null;
+  is_jito?: boolean | null;
+  is_dz?: boolean | null;
+};
+
+// Stake-weighted client breakdown per pool. Published by gdi-publish.
+export type ClientDistribution = {
+  by_client: { client: string; stake_sol: number; stake_share: number; validator_count: number }[];
+  operational: { jito_share: number; dz_share: number };
+  effective_clients: number | null;
+  unclassified: { stake_sol: number; stake_share: number };
 };
 
 export type PoolLatest = {
@@ -79,6 +92,8 @@ export type PoolLatest = {
   network_baseline: FormattedBaseline | null;
   rank: number | null;
   total_ranked: number;
+  // Optional for backwards compat — older published JSON won't have it.
+  client_distribution?: ClientDistribution | null;
   validators: PoolValidator[];
 };
 

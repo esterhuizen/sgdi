@@ -156,6 +156,35 @@ export default async function PoolDetailPage({ params }: Props) {
         </div>
       </section>
 
+      {/* Client diversity + operational signals (gdi-1.2 phase 1).
+          Phase 1: surfaced as separate metrics, NOT folded into headline GDI. */}
+      {latest.client_distribution && (
+        <section className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="surface p-5">
+            <div className="text-xs uppercase tracking-wider text-ink-dim">Effective clients</div>
+            <div className="num mt-2 text-2xl text-ink">
+              {latest.client_distribution.effective_clients != null
+                ? fmt.num(latest.client_distribution.effective_clients, 2)
+                : '—'}
+            </div>
+            <div className="text-xs text-ink-dim">
+              client-diversity score — as-if N equal clients (
+              <Link href="/methodology#client-diversity" className="drilldown hover:text-ink">
+                see breakdown
+              </Link>
+              )
+            </div>
+          </div>
+          <div className="surface p-5">
+            <div className="text-xs uppercase tracking-wider text-ink-dim">DoubleZero</div>
+            <div className="num mt-2 text-2xl text-ink">
+              {fmt.pct(latest.client_distribution.operational.dz_share)}
+            </div>
+            <div className="text-xs text-ink-dim">stake on dedicated fibre — faster voting + block production</div>
+          </div>
+        </section>
+      )}
+
       {/* Trend chart */}
       <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
