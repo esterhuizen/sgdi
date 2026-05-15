@@ -205,20 +205,8 @@ export default async function Image() {
               <div style={{ width: 60, display: 'flex', color: C.inkDim, fontWeight: 600 }}>
                 {i + 1}
               </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ display: 'flex', fontWeight: 600, color: C.ink }}>
-                  {t.country} · {t.city}
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    fontSize: 16,
-                    color: C.inkDim,
-                    marginTop: 2,
-                  }}
-                >
-                  {t.asnName}
-                </div>
+              <div style={{ flex: 1, display: 'flex', fontWeight: 600, color: C.ink }}>
+                {t.country} · {t.city} · {t.asnName}
               </div>
               <div
                 style={{
