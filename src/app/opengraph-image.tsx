@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { loadLeaderboard } from '@/lib/data';
+import { DEFAULT_TVL_FLOOR_SOL } from '@/lib/leaderboard-config';
 
 // Auto-generated 1200×630 PNG for tweet/Slack/Discord unfurls.
 // Renders the top-5 pools at the current epoch.
@@ -44,11 +45,18 @@ const fmt = {
 
 export default async function Image() {
   const data = await loadLeaderboard();
+  // Mirror the site's default UI filter so the OG card and the live
+  // leaderboard show the same pools at the same ranks. Without the
+  // TVL floor we'd surface dust pools (e.g. xandSOL at 28k SOL) that
+  // the site itself hides — confusing for anyone clicking through.
   const sortedPools =
     data?.pools
-      ?.filter((p) => p.gdi != null)
+      ?.filter((p) => p.gdi != null && (p.total_stake_sol ?? 0) >= DEFAULT_TVL_FLOOR_SOL)
       .sort((a, b) => (b.gdi ?? 0) - (a.gdi ?? 0))
       .slice(0, 5) ?? [];
+  const filteredCount = (data?.pools ?? []).filter(
+    (p) => p.gdi != null && (p.total_stake_sol ?? 0) >= DEFAULT_TVL_FLOOR_SOL,
+  ).length;
 
   return new ImageResponse(
     (
@@ -115,7 +123,7 @@ export default async function Image() {
               }}
             >
               Top 5 pools by GDI · epoch {data.epoch} ·{' '}
-              {sortedPools.length === 5 ? `${data.pools.length} pools tracked` : ''}
+              {sortedPools.length === 5 ? `${filteredCount} pools tracked` : ''}
             </div>
           ) : (
             <div
@@ -136,7 +144,7 @@ export default async function Image() {
           style={{
             display: 'flex',
             flexDirection: 'column',
-            marginTop: 28,
+            marginTop: 20,
             border: `1px solid ${C.ring}`,
             borderRadius: 16,
             overflow: 'hidden',
@@ -169,7 +177,7 @@ export default async function Image() {
               key={p.pool_address}
               style={{
                 display: 'flex',
-                padding: '18px 28px',
+                padding: '14px 28px',
                 borderTop: `1px solid ${C.ring}`,
                 fontSize: 28,
                 alignItems: 'center',
