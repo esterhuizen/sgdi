@@ -6,14 +6,29 @@ import { LocationsTable, type TupleRow } from '@/components/LocationsTable';
 
 export const revalidate = 60;
 
-export const metadata: Metadata = {
-  title: 'Where to host for maximum stake',
-  description:
-    'Rare validator (country, city, ASN) tuples sorted by composite rarity, ' +
-    'filterable by DoubleZero support. For validator operators: find the ' +
-    'specific hosting location where your validator earns the most ' +
-    'decentralisation score.',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const idx = await loadValidatorIndex();
+  // Embed the epoch in the og:image URL so each new epoch produces a URL X
+  // has never seen — forces re-scrape so unfurls pick up the latest rarity
+  // ranking. Same pattern as the landing page.
+  const epoch = idx?.epoch ?? 0;
+  const ogImageUrl = `/locations/opengraph-image?epoch=${epoch}`;
+  return {
+    title: 'Where to host for maximum stake',
+    description:
+      'Rare validator (country, city, ASN) tuples sorted by composite rarity, ' +
+      'filterable by DoubleZero support. For validator operators: find the ' +
+      'specific hosting location where your validator earns the most ' +
+      'decentralisation score.',
+    openGraph: {
+      images: [{ url: ogImageUrl, width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      images: [ogImageUrl],
+    },
+  };
+}
 
 /**
  * Aggregate per-validator entries from validator-index.json into one row per
