@@ -16,7 +16,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: 'Where to host for maximum stake',
     description:
-      'Rare validator (country, city, ASN) tuples sorted by composite rarity, ' +
+      'Rare validator (country, city, ASN) tuples sorted by rarity, ' +
       'filterable by DoubleZero support. For validator operators: find the ' +
       'specific hosting location where your validator earns the most ' +
       'decentralisation score.',
@@ -111,7 +111,7 @@ export default async function LocationsPage() {
         <p className="mt-3 text-base leading-relaxed text-ink-muted">
           Each row below is a real (country, city, ASN) location currently
           occupied by at least one validator. The{' '}
-          <span className="font-medium text-ink">composite rarity</span> is the
+          <span className="font-medium text-ink">rarity</span> column is the
           geometric mean of the three per-dimension rarities — the same formula
           we use for <GdiLink />. Higher = more decentralising. Click any
           column header to re-sort.
@@ -141,7 +141,7 @@ export default async function LocationsPage() {
               </div>
             </div>
             <div className="surface p-4">
-              <div className="text-xs uppercase tracking-wider text-ink-dim">Composite formula</div>
+              <div className="text-xs uppercase tracking-wider text-ink-dim">Rarity formula</div>
               <div className="mt-1 text-sm text-ink">
                 <code className="rounded bg-bg-muted px-1.5 py-0.5">
                   ∛(r_country · r_city · r_asn)
@@ -159,9 +159,9 @@ export default async function LocationsPage() {
             </h2>
             <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-relaxed text-ink-muted">
               <li>
-                <strong className="text-ink">Composite</strong> is the headline
-                rarity — geometric mean of the country, city, and ASN rarities
-                for that exact tuple. Sort by this for the strongest overall
+                <strong className="text-ink">Rarity</strong> is the headline
+                — geometric mean of the country, city, and ASN rarities for
+                that exact tuple. Sort by this for the strongest overall
                 decentralisation candidates.
               </li>
               <li>
@@ -169,7 +169,7 @@ export default async function LocationsPage() {
                 dimension&apos;s rarity in isolation —{' '}
                 <code className="rounded bg-bg-muted px-1 py-0.5">−ln(network_share)</code>.
                 Click the column header to sort by that dimension instead of
-                the composite.
+                the headline rarity.
               </li>
               <li>
                 <strong className="text-ink">Performance</strong> is the simple

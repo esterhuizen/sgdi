@@ -156,8 +156,9 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
         <table className="w-full text-sm">
           <thead className="bg-bg-muted/40 text-left text-xs uppercase tracking-[0.10em] text-ink-dim">
             <tr>
-              <SortHeader field="composite" active={sortField === 'composite'} dir={sortDir} onSort={toggleSort}>
-                Composite
+              <SortHeader field="composite" active={sortField === 'composite'} dir={sortDir} onSort={toggleSort}
+                title="Rarity = geometric mean of country, city, ASN rarities">
+                Rarity
               </SortHeader>
               <SortHeader field="country" active={sortField === 'country'} dir={sortDir} onSort={toggleSort}
                 title="Sort by country rarity">

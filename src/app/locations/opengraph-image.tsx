@@ -186,7 +186,7 @@ export default async function Image() {
           >
             <div style={{ width: 60, display: 'flex' }}>#</div>
             <div style={{ flex: 1, display: 'flex' }}>Location</div>
-            <div style={{ width: 160, display: 'flex', justifyContent: 'flex-end' }}>Composite</div>
+            <div style={{ width: 160, display: 'flex', justifyContent: 'flex-end' }}>Rarity</div>
             <div style={{ width: 200, display: 'flex', justifyContent: 'flex-end' }}>Val · DZ</div>
           </div>
 
