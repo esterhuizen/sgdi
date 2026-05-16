@@ -25,7 +25,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createLogger } from '../src/lib/gdi/logger.ts';
+import { createLogger, type ModuleLogger } from '../src/lib/gdi/logger.ts';
 import { openStorage } from '../src/lib/gdi/storage.ts';
 import {
   createRpc,
@@ -85,6 +85,79 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+/**
+ * Defensive sanitizer for validators.app payloads.
+ *
+ * validators.app has intermittently returned all-"SolanaLabs" responses
+ * from some instances behind their load balancer — every label collapses
+ * to a single value. If we ingest such a payload, the upsert overwrites
+ * good DB labels with "SolanaLabs", breaking the CDI / client-distribution
+ * surfaces until a subsequent good payload restores them.
+ *
+ * This function detects the collapse (>100 labeled validators, <3 distinct
+ * software_client values), nulls out the client_* fields in the payload
+ * so the upsert's COALESCE preserves last-good DB values, and fires a
+ * Telegram alert with a file-based 6h cooldown so sustained outages
+ * don't spam the channel every 30 minutes.
+ *
+ * Returns the (possibly sanitized) array. Geo / jito / is_dz / version
+ * fields are independent and always pass through unaffected.
+ */
+async function sanitizeValidatorsAppPayload<T extends {
+  software_client: string | null;
+  software_client_id: number | null;
+}>(
+  vaData: T[],
+  ctx: { epoch: number; log: ModuleLogger },
+): Promise<T[]> {
+  if (vaData.length === 0) return vaData;
+  const labeled = vaData.filter((v) => v.software_client);
+  const distinctClients = new Set(labeled.map((v) => v.software_client)).size;
+  if (labeled.length <= 100 || distinctClients >= 3) return vaData;
+
+  ctx.log.warn('validators_app.payload_rejected', {
+    reason: 'too_few_distinct_software_client_labels',
+    labeled_validators: labeled.length,
+    distinct_labels: distinctClients,
+    labels_seen: [...new Set(labeled.map((v) => v.software_client))],
+  });
+
+  // File-based 6h cooldown so a sustained outage doesn't spam alerts.
+  const cooldownPath =
+    (process.env.SGDI_DB_PATH ?? '/var/lib/sgdi/gdi.db').replace(/[^/]*$/, '') +
+    '.alert-validators_app_payload_rejected';
+  const sixHoursMs = 6 * 60 * 60 * 1000;
+  const { existsSync, statSync, writeFileSync } = await import('node:fs');
+  let onCooldown = false;
+  try {
+    if (existsSync(cooldownPath)) {
+      const age = Date.now() - statSync(cooldownPath).mtimeMs;
+      if (age < sixHoursMs) onCooldown = true;
+    }
+  } catch { /* fall through: send */ }
+
+  if (onCooldown) {
+    ctx.log.info('alert.skipped', { kind: 'validators_app_payload_rejected', reason: 'cooldown_active' });
+  } else {
+    const { sendSgdiAlert } = await import('../src/lib/gdi/telegram.ts');
+    const result = await sendSgdiAlert(
+      `⚠ validators.app payload rejected — software_client labels collapsed ` +
+      `(${distinctClients} distinct across ${labeled.length} labeled validators). ` +
+      `Holding last-good client_name values in DB. Epoch ${ctx.epoch}.`,
+    );
+    if (!result.ok) {
+      ctx.log.warn('alert.skipped', { reason: result.reason, detail: result.detail });
+    } else {
+      ctx.log.info('alert.sent', { kind: 'validators_app_payload_rejected' });
+      try { writeFileSync(cooldownPath, String(Date.now())); }
+      catch (e) { ctx.log.warn('alert.cooldown_write_failed', { error: errMessage(e) }); }
+    }
+  }
+
+  // Strip the client_* fields; geo + jito + is_dz + version pass through.
+  return vaData.map((v) => ({ ...v, software_client: null, software_client_id: null }));
+}
+
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -125,7 +198,12 @@ async function main() {
     log.info('epoch.skipped', { epoch, reason: 'already_ingested' });
     try {
       const swData = await stakewiz.fetchAllValidators();
-      const vaData = await validatorsApp.fetchAllValidators().catch(() => []);
+      let vaData = await validatorsApp.fetchAllValidators().catch(() => []);
+      // Same defensive sanitizer as the heavy path. Without this the skip-path
+      // (which runs on every timer tick after the epoch is first ingested)
+      // would happily overwrite good DB labels with broken collapsed labels
+      // every 30 minutes.
+      vaData = await sanitizeValidatorsAppPayload(vaData, { epoch, log });
       const stakewizMap = new Map(swData.map((v) => [v.vote_identity, v]));
       const vaMap = new Map(vaData.map((v) => [v.vote_account, v]));
       const pubkeys = new Set<string>();
@@ -285,69 +363,10 @@ async function main() {
     log.warn('validators_app.fetch.failed', { error: errMessage(e) });
   }
 
-  // Defensive validation: validators.app has intermittently returned
-  // collapsed software_client labels (everything → "SolanaLabs") from
-  // some instances behind their LB. Detect that pattern and null out the
-  // client_* fields so the upsert's COALESCE preserves last-good DB
-  // values rather than overwriting with garbage. Geo + jito + is_dz
-  // fields are independent and pass through unaffected.
-  //
-  // Threshold: if >100 validators were labeled AND fewer than 3 distinct
-  // labels were seen, the payload is broken. Real data has ~9 distinct
-  // labels (AgaveBam, JitoLabs, Frankendancer, Firedancer, HarmonicAgave,
-  // Rakurai, HarmonicFrankendancer, Agave, Unknown).
-  if (vaData.length > 0) {
-    const labeled = vaData.filter((v) => v.software_client);
-    const distinctClients = new Set(labeled.map((v) => v.software_client)).size;
-    if (labeled.length > 100 && distinctClients < 3) {
-      log.warn('validators_app.payload_rejected', {
-        reason: 'too_few_distinct_software_client_labels',
-        labeled_validators: labeled.length,
-        distinct_labels: distinctClients,
-        labels_seen: [...new Set(labeled.map((v) => v.software_client))],
-      });
-      // Strip the client_* fields so the upsert preserves DB values.
-      // Keep everything else (geo, jito flag, is_dz, version string).
-      vaData = vaData.map((v) => ({
-        ...v,
-        software_client: null,
-        software_client_id: null,
-      }));
-      // Fire a Telegram alert so we know upstream is acting up. File-based
-      // cooldown: alert at most once per 6h so a sustained outage doesn't
-      // spam the channel every 30 minutes. The sentinel lives alongside
-      // the DB so it survives ingest restarts but resets on box rebuild.
-      const cooldownPath =
-        (process.env.SGDI_DB_PATH ?? '/var/lib/sgdi/gdi.db').replace(/[^/]*$/, '') +
-        '.alert-validators_app_payload_rejected';
-      const sixHoursMs = 6 * 60 * 60 * 1000;
-      const { existsSync, statSync, writeFileSync } = await import('node:fs');
-      let onCooldown = false;
-      try {
-        if (existsSync(cooldownPath)) {
-          const age = Date.now() - statSync(cooldownPath).mtimeMs;
-          if (age < sixHoursMs) onCooldown = true;
-        }
-      } catch { /* fall through: send */ }
-      if (onCooldown) {
-        log.info('alert.skipped', { kind: 'validators_app_payload_rejected', reason: 'cooldown_active' });
-      } else {
-        const { sendSgdiAlert } = await import('../src/lib/gdi/telegram.ts');
-        const result = await sendSgdiAlert(
-          `⚠ validators.app payload rejected — software_client labels collapsed ` +
-          `(${distinctClients} distinct across ${labeled.length} labeled validators). ` +
-          `Holding last-good client_name values in DB. Epoch ${epoch}.`,
-        );
-        if (!result.ok) {
-          log.warn('alert.skipped', { reason: result.reason, detail: result.detail });
-        } else {
-          log.info('alert.sent', { kind: 'validators_app_payload_rejected' });
-          try { writeFileSync(cooldownPath, String(Date.now())); }
-          catch (e) { log.warn('alert.cooldown_write_failed', { error: errMessage(e) }); }
-        }
-      }
-    }
-  }
+  // Same defensive sanitizer the skip-path uses. Keep the call in both
+  // places — the heavy path runs once per epoch, the skip-path runs
+  // every 30 min for the rest of the epoch.
+  vaData = await sanitizeValidatorsAppPayload(vaData, { epoch, log });
 
   const stakewizMap = new Map(stakewizData.map((v) => [v.vote_identity, v]));
   const vaMap = new Map(vaData.map((v) => [v.vote_account, v]));
