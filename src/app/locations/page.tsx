@@ -38,7 +38,9 @@ export async function generateMetadata(): Promise<Metadata> {
  * the data lets us know about; "empty" hypothetical tuples can't be surfaced.
  */
 function aggregateTuples(rows: readonly ValidatorIndexEntry[]): TupleRow[] {
-  const tuples = new Map<string, TupleRow>();
+  // Two-pass: first build the buckets + per-validator sums, then compute means.
+  type Agg = TupleRow & { _wizSum: number; _wizN: number };
+  const tuples = new Map<string, Agg>();
   for (const v of rows) {
     if (!v.country || !v.city || !v.asn) continue;
     const key = `${v.country}|${v.city}|${v.asn}`;
@@ -57,14 +59,29 @@ function aggregateTuples(rows: readonly ValidatorIndexEntry[]): TupleRow[] {
         validatorCount: 0,
         dzCount: 0,
         totalStakeSol: 0,
+        avgWizScore: null,
+        _wizSum: 0,
+        _wizN: 0,
       };
       tuples.set(key, t);
     }
     t.validatorCount += 1;
     if (v.is_dz === true) t.dzCount += 1;
     t.totalStakeSol += v.activated_stake_sol;
+    // Simple unweighted mean: each validator at the location counts equally.
+    // Chosen over stake-weighting because the audience is new operators
+    // evaluating where to host — they want "typical infra quality here", not
+    // "what the network experiences from the whale here".
+    if (typeof v.wiz_score === 'number' && Number.isFinite(v.wiz_score)) {
+      t._wizSum += v.wiz_score;
+      t._wizN += 1;
+    }
   }
-  return [...tuples.values()];
+  // Finalise: compute mean, strip internal sums before returning.
+  return [...tuples.values()].map(({ _wizSum, _wizN, ...t }) => ({
+    ...t,
+    avgWizScore: _wizN > 0 ? _wizSum / _wizN : null,
+  }));
 }
 
 export default async function LocationsPage() {
@@ -153,6 +170,22 @@ export default async function LocationsPage() {
                 <code className="rounded bg-bg-muted px-1 py-0.5">−ln(network_share)</code>.
                 Click the column header to sort by that dimension instead of
                 the composite.
+              </li>
+              <li>
+                <strong className="text-ink">Performance</strong> is the simple
+                arithmetic mean of{' '}
+                <a href="https://api.stakewiz.com" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">
+                  Stakewiz
+                </a>
+                &apos;s <code className="rounded bg-bg-muted px-1 py-0.5">wiz_score</code>{' '}
+                (0–100) across the validators at this location. Captures vote
+                success, skip rate, uptime, commission, and the operator&apos;s
+                info-completeness — a real composite of "do these validators
+                actually deliver". Equal-weighted per operator (not stake-
+                weighted) so a single whale doesn&apos;t dominate the typical-
+                infra signal. <em>Caveat:</em> reflects the validators currently
+                there; a new validator moving in inherits the location, not the
+                score.
               </li>
               <li>
                 <strong className="text-ink">On DZ</strong>{' '}

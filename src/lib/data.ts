@@ -144,6 +144,9 @@ export type ValidatorIndexEntry = {
   // Operational flags surfaced for the /locations dashboard.
   is_dz?: boolean | null;
   is_jito?: boolean | null;
+  // Stakewiz composite performance score (0-100). Optional for backwards
+  // compat with older published JSON that pre-dates the field.
+  wiz_score?: number | null;
 };
 
 export type ValidatorIndex = {

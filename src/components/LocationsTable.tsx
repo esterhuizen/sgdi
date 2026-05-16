@@ -22,9 +22,12 @@ export type TupleRow = {
   validatorCount: number;
   dzCount: number;
   totalStakeSol: number;
+  /** Simple (unweighted) mean of stakewiz wiz_score across all validators at
+   *  this tuple. null when no validator at the location has a wiz_score. */
+  avgWizScore: number | null;
 };
 
-type SortField = 'composite' | 'country' | 'city' | 'asn' | 'validators' | 'dz' | 'stake';
+type SortField = 'composite' | 'country' | 'city' | 'asn' | 'performance' | 'validators' | 'dz' | 'stake';
 type SortDir = 'asc' | 'desc';
 
 const fmt = {
@@ -41,13 +44,14 @@ const SECTION_LIMIT = 25;
 
 function sortValue(r: TupleRow, field: SortField): number {
   switch (field) {
-    case 'composite': return r.composite ?? -Infinity;
-    case 'country':   return r.rarityCountry ?? -Infinity;  // sort by per-dim rarity, not alpha
-    case 'city':      return r.rarityCity ?? -Infinity;
-    case 'asn':       return r.rarityAsn ?? -Infinity;
-    case 'validators':return r.validatorCount;
-    case 'dz':        return r.dzCount;
-    case 'stake':     return r.totalStakeSol;
+    case 'composite':   return r.composite ?? -Infinity;
+    case 'country':     return r.rarityCountry ?? -Infinity;  // sort by per-dim rarity, not alpha
+    case 'city':        return r.rarityCity ?? -Infinity;
+    case 'asn':         return r.rarityAsn ?? -Infinity;
+    case 'performance': return r.avgWizScore ?? -Infinity;
+    case 'validators':  return r.validatorCount;
+    case 'dz':          return r.dzCount;
+    case 'stake':       return r.totalStakeSol;
   }
 }
 
@@ -167,6 +171,10 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                 title="Sort by ASN rarity">
                 ASN
               </SortHeader>
+              <SortHeader field="performance" active={sortField === 'performance'} dir={sortDir} onSort={toggleSort} align="right"
+                title="Avg Stakewiz wiz_score across validators at this location (0-100)">
+                Performance
+              </SortHeader>
               <SortHeader field="validators" active={sortField === 'validators'} dir={sortDir} onSort={toggleSort} align="right">
                 Validators
               </SortHeader>
@@ -181,7 +189,7 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
           <tbody className="text-ink">
             {visible.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-ink-dim">
+                <td colSpan={8} className="py-12 text-center text-ink-dim">
                   No locations match the current filter.
                 </td>
               </tr>
@@ -208,6 +216,9 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                     <span className="font-mono">{r.asnId}</span>{' '}
                     · <span className="tabular-nums">{fmt.num(r.rarityAsn, 2)}</span>
                   </div>
+                </td>
+                <td className="num py-3 pr-3 text-right text-ink tabular-nums">
+                  {fmt.num(r.avgWizScore, 1)}
                 </td>
                 <td className="num py-3 pr-3 text-right text-ink-muted tabular-nums">
                   {r.validatorCount}

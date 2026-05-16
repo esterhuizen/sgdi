@@ -419,6 +419,10 @@ async function main() {
     // gdi-1.2 phase 1 — operational flags powering /locations dashboard.
     is_dz: boolean | null;
     is_jito: boolean | null;
+    // Stakewiz composite performance score (0-100) — vote success, skip rate,
+    // uptime, commission, info score, concentration penalties. Surfaced on
+    // /locations as the per-location "Performance" column.
+    wiz_score: number | null;
   };
 
   const RARITY_FLOOR = 1e-9;
@@ -462,6 +466,7 @@ async function main() {
       composite_rarity: null,
       is_dz: v.is_dz == null ? null : v.is_dz === 1,
       is_jito: v.is_jito == null ? null : v.is_jito === 1,
+      wiz_score: v.stakewiz_wiz_score,
     });
   }
 
