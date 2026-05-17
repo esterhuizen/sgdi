@@ -39,7 +39,10 @@ export async function generateMetadata(): Promise<Metadata> {
  */
 function aggregateTuples(rows: readonly ValidatorIndexEntry[]): TupleRow[] {
   // Two-pass: first build the buckets + per-validator sums, then compute means.
-  type Agg = TupleRow & { _wizSum: number; _wizN: number };
+  type Agg = TupleRow & {
+    _wizSum: number; _wizN: number;
+    _ibrlSum: number; _ibrlN: number;
+  };
   const tuples = new Map<string, Agg>();
   for (const v of rows) {
     if (!v.country || !v.city || !v.asn) continue;
@@ -60,27 +63,36 @@ function aggregateTuples(rows: readonly ValidatorIndexEntry[]): TupleRow[] {
         dzCount: 0,
         totalStakeSol: 0,
         avgWizScore: null,
+        avgIbrlScore: null,
         _wizSum: 0,
         _wizN: 0,
+        _ibrlSum: 0,
+        _ibrlN: 0,
       };
       tuples.set(key, t);
     }
     t.validatorCount += 1;
     if (v.is_dz === true) t.dzCount += 1;
     t.totalStakeSol += v.activated_stake_sol;
-    // Simple unweighted mean: each validator at the location counts equally.
-    // Chosen over stake-weighting because the audience is new operators
-    // evaluating where to host — they want "typical infra quality here", not
-    // "what the network experiences from the whale here".
+    // Simple unweighted mean for both Performance + IBRL. Each validator at
+    // the location counts equally — audience is new operators evaluating
+    // typical infra quality, not "what the whale here experiences".
+    // Validators missing a score (e.g. no blocks produced this epoch for
+    // IBRL) are excluded from the mean rather than counted as zero.
     if (typeof v.wiz_score === 'number' && Number.isFinite(v.wiz_score)) {
       t._wizSum += v.wiz_score;
       t._wizN += 1;
     }
+    if (typeof v.ibrl_score === 'number' && Number.isFinite(v.ibrl_score)) {
+      t._ibrlSum += v.ibrl_score;
+      t._ibrlN += 1;
+    }
   }
-  // Finalise: compute mean, strip internal sums before returning.
-  return [...tuples.values()].map(({ _wizSum, _wizN, ...t }) => ({
+  // Finalise: compute means, strip internal sums before returning.
+  return [...tuples.values()].map(({ _wizSum, _wizN, _ibrlSum, _ibrlN, ...t }) => ({
     ...t,
     avgWizScore: _wizN > 0 ? _wizSum / _wizN : null,
+    avgIbrlScore: _ibrlN > 0 ? _ibrlSum / _ibrlN : null,
   }));
 }
 
@@ -186,6 +198,21 @@ export default async function LocationsPage() {
                 infra signal. <em>Caveat:</em> reflects the validators currently
                 there; a new validator moving in inherits the location, not the
                 score.
+              </li>
+              <li>
+                <strong className="text-ink">IBRL</strong> (
+                <a href="https://ibrl.wtf/methodology/" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">
+                  Increase Bandwidth, Reduce Latency
+                </a>
+                ) is the simple arithmetic mean of Jito&apos;s IBRL block-build
+                score (0–100) across the validators at this location. Weights
+                non-vote packing (45%), slot time (40%), and vote packing
+                (15%) — measures how efficiently each validator builds blocks
+                when it&apos;s the leader. More directly tied to network and DC
+                quality than wiz_score, which is why it&apos;s shown alongside.
+                Validators that produced no blocks this epoch are excluded
+                rather than counted as zero, and a dash means nobody at this
+                tuple had a score.
               </li>
               <li>
                 <strong className="text-ink">On DZ</strong>{' '}

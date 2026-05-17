@@ -423,6 +423,9 @@ async function main() {
     // uptime, commission, info score, concentration penalties. Surfaced on
     // /locations as the per-location "Performance" column.
     wiz_score: number | null;
+    // IBRL block-build quality (Jito explorer.bam.dev) 0-100 — surfaced as
+    // the per-location "IBRL" column.
+    ibrl_score: number | null;
   };
 
   const RARITY_FLOOR = 1e-9;
@@ -467,6 +470,7 @@ async function main() {
       is_dz: v.is_dz == null ? null : v.is_dz === 1,
       is_jito: v.is_jito == null ? null : v.is_jito === 1,
       wiz_score: v.stakewiz_wiz_score,
+      ibrl_score: v.ibrl_score,
     });
   }
 

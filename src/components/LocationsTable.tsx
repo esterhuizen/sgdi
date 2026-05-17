@@ -25,9 +25,12 @@ export type TupleRow = {
   /** Simple (unweighted) mean of stakewiz wiz_score across all validators at
    *  this tuple. null when no validator at the location has a wiz_score. */
   avgWizScore: number | null;
+  /** Simple (unweighted) mean of IBRL score across validators that produced
+   *  ≥1 block this epoch. null when nobody at the tuple has a score. */
+  avgIbrlScore: number | null;
 };
 
-type SortField = 'composite' | 'country' | 'city' | 'asn' | 'performance' | 'validators' | 'dz' | 'stake';
+type SortField = 'composite' | 'country' | 'city' | 'asn' | 'performance' | 'ibrl' | 'validators' | 'dz' | 'stake';
 type SortDir = 'asc' | 'desc';
 
 const fmt = {
@@ -49,6 +52,7 @@ function sortValue(r: TupleRow, field: SortField): number {
     case 'city':        return r.rarityCity ?? -Infinity;
     case 'asn':         return r.rarityAsn ?? -Infinity;
     case 'performance': return r.avgWizScore ?? -Infinity;
+    case 'ibrl':        return r.avgIbrlScore ?? -Infinity;
     case 'validators':  return r.validatorCount;
     case 'dz':          return r.dzCount;
     case 'stake':       return r.totalStakeSol;
@@ -176,6 +180,10 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                 title="Avg Stakewiz wiz_score across validators at this location (0-100)">
                 Performance
               </SortHeader>
+              <SortHeader field="ibrl" active={sortField === 'ibrl'} dir={sortDir} onSort={toggleSort} align="right"
+                title="Avg IBRL block-build quality score (Jito) across validators at this location (0-100)">
+                IBRL
+              </SortHeader>
               <SortHeader field="validators" active={sortField === 'validators'} dir={sortDir} onSort={toggleSort} align="right">
                 Validators
               </SortHeader>
@@ -190,7 +198,7 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
           <tbody className="text-ink">
             {visible.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-12 text-center text-ink-dim">
+                <td colSpan={9} className="py-12 text-center text-ink-dim">
                   No locations match the current filter.
                 </td>
               </tr>
@@ -220,6 +228,9 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                 </td>
                 <td className="num py-3 pr-3 text-right text-ink tabular-nums">
                   {fmt.num(r.avgWizScore, 1)}
+                </td>
+                <td className="num py-3 pr-3 text-right text-ink tabular-nums">
+                  {fmt.num(r.avgIbrlScore, 1)}
                 </td>
                 <td className="num py-3 pr-3 text-right text-ink-muted tabular-nums">
                   {r.validatorCount}

@@ -37,6 +37,7 @@ import {
 } from '../src/lib/gdi/data-sources/rpc.ts';
 import { createStakewiz } from '../src/lib/gdi/data-sources/stakewiz.ts';
 import { createValidatorsApp } from '../src/lib/gdi/data-sources/validators-app.ts';
+import { createIbrl } from '../src/lib/gdi/data-sources/ibrl.ts';
 import { createJupiter, buildMintNameMap } from '../src/lib/gdi/data-sources/jupiter.ts';
 import { enrichValidators } from '../src/lib/gdi/enrichment.ts';
 import {
@@ -176,6 +177,7 @@ async function main() {
   const rpc = createRpc({ url: rpcUrl, logger: logger.forModule('rpc') });
   const stakewiz = createStakewiz({ logger: logger.forModule('stakewiz') });
   const validatorsApp = createValidatorsApp({ logger: logger.forModule('validators-app') });
+  const ibrl = createIbrl({ logger: logger.forModule('ibrl') });
   const jupiter = createJupiter({ logger: logger.forModule('jupiter') });
 
   log.info('start', { run_id: logger.runId });
@@ -204,14 +206,20 @@ async function main() {
       // would happily overwrite good DB labels with broken collapsed labels
       // every 30 minutes.
       vaData = await sanitizeValidatorsAppPayload(vaData, { epoch, log });
+      const ibrlData = await ibrl.fetchAllValidators().catch((e) => {
+        log.warn('ibrl.fetch.failed', { error: errMessage(e) });
+        return [];
+      });
       const stakewizMap = new Map(swData.map((v) => [v.vote_identity, v]));
       const vaMap = new Map(vaData.map((v) => [v.vote_account, v]));
+      const ibrlMap = new Map(ibrlData.map((v) => [v.identity, v]));
       const pubkeys = new Set<string>();
       for (const v of swData) pubkeys.add(v.vote_identity);
       const refreshed = enrichValidators({
         pubkeys: Array.from(pubkeys),
         stakewiz: stakewizMap,
         validatorsApp: vaMap,
+        ibrl: ibrlMap,
         logger: logger.forModule('enrichment'),
         now: nowSeconds(),
       });
@@ -368,8 +376,16 @@ async function main() {
   // every 30 min for the rest of the epoch.
   vaData = await sanitizeValidatorsAppPayload(vaData, { epoch, log });
 
+  // IBRL (block-build quality, Jito). Failure is non-fatal — enrichment
+  // tolerates a missing map.
+  const ibrlData = await ibrl.fetchAllValidators().catch((e) => {
+    log.warn('ibrl.fetch.failed', { error: errMessage(e) });
+    return [];
+  });
+
   const stakewizMap = new Map(stakewizData.map((v) => [v.vote_identity, v]));
   const vaMap = new Map(vaData.map((v) => [v.vote_account, v]));
+  const ibrlMap = new Map(ibrlData.map((v) => [v.identity, v]));
 
   // 5. Enrichment for the union of validators across all successful pools,
   //    PLUS all stakewiz validators (for the network-baseline computation).
@@ -386,6 +402,7 @@ async function main() {
     pubkeys: Array.from(poolPubkeys),
     stakewiz: stakewizMap,
     validatorsApp: vaMap,
+    ibrl: ibrlMap,
     logger: logger.forModule('enrichment'),
     now: nowSeconds(),
   });

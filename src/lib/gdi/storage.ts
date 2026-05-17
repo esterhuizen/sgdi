@@ -153,6 +153,9 @@ export type ValidatorRow = {
   client_version: string | null;   // e.g. "3.1.13", "0.820.30113"
   is_jito: number | null;          // 0 / 1; null = unknown
   is_dz: number | null;            // 0 / 1; null = unknown — DoubleZero network participation
+  // IBRL block-build quality score (Jito explorer.bam.dev). 0-100, null when
+  // the validator hasn't produced blocks in the current epoch.
+  ibrl_score: number | null;
 };
 
 export type PoolSnapshot = {
@@ -240,6 +243,8 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     addColumn('validators', 'client_version',           'TEXT');
     addColumn('validators', 'is_jito',                  'INTEGER');
     addColumn('validators', 'is_dz',                    'INTEGER');
+    // IBRL block-build quality score (Jito) — additive.
+    addColumn('validators', 'ibrl_score',               'REAL');
   }
 
   const stmt = {
@@ -274,13 +279,13 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
          country_source, city_source, asn_source, metadata_refreshed_at,
          stakewiz_wiz_score, stakewiz_city_concentration, stakewiz_asn_concentration, stakewiz_refreshed_at,
          activated_stake_lamports, delinquent, image_url,
-         client_name, client_version, is_jito, is_dz)
+         client_name, client_version, is_jito, is_dz, ibrl_score)
       VALUES
         (@validator_pubkey, @identity_pubkey, @identity_name, @country, @city, @asn, @asn_name, @datacenter,
          @country_source, @city_source, @asn_source, @metadata_refreshed_at,
          @stakewiz_wiz_score, @stakewiz_city_concentration, @stakewiz_asn_concentration, @stakewiz_refreshed_at,
          @activated_stake_lamports, @delinquent, @image_url,
-         @client_name, @client_version, @is_jito, @is_dz)
+         @client_name, @client_version, @is_jito, @is_dz, @ibrl_score)
       ON CONFLICT(validator_pubkey) DO UPDATE SET
         identity_pubkey             = COALESCE(excluded.identity_pubkey,             validators.identity_pubkey),
         identity_name               = COALESCE(excluded.identity_name,               validators.identity_name),
@@ -305,7 +310,8 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         client_name                 = COALESCE(excluded.client_name,                 validators.client_name),
         client_version              = COALESCE(excluded.client_version,              validators.client_version),
         is_jito                     = COALESCE(excluded.is_jito,                     validators.is_jito),
-        is_dz                       = COALESCE(excluded.is_dz,                       validators.is_dz)
+        is_dz                       = COALESCE(excluded.is_dz,                       validators.is_dz),
+        ibrl_score                  = COALESCE(excluded.ibrl_score,                  validators.ibrl_score)
     `),
     getValidator: db.prepare(`SELECT * FROM validators WHERE validator_pubkey = ?`),
     listAllValidators: db.prepare(`SELECT * FROM validators`),

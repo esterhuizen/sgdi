@@ -147,6 +147,9 @@ export type ValidatorIndexEntry = {
   // Stakewiz composite performance score (0-100). Optional for backwards
   // compat with older published JSON that pre-dates the field.
   wiz_score?: number | null;
+  // IBRL block-build quality (Jito) 0-100. Null when validator produced no
+  // blocks in the current epoch.
+  ibrl_score?: number | null;
 };
 
 export type ValidatorIndex = {

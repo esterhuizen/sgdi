@@ -11,6 +11,7 @@
 
 import type { StakewizValidator } from './data-sources/stakewiz.ts';
 import type { ValidatorsAppValidator } from './data-sources/validators-app.ts';
+import type { IbrlValidator } from './data-sources/ibrl.ts';
 import type { ValidatorRow } from './storage.ts';
 import type { ModuleLogger } from './logger.ts';
 
@@ -21,6 +22,9 @@ export type EnrichmentInput = {
   stakewiz: ReadonlyMap<string, StakewizValidator>;
   /** Validators.app validators keyed by `vote_account`. */
   validatorsApp: ReadonlyMap<string, ValidatorsAppValidator>;
+  /** IBRL validators keyed by `identity` (node identity, not vote pubkey).
+   *  Optional — caller may omit if the IBRL fetch failed. */
+  ibrl?: ReadonlyMap<string, IbrlValidator>;
   logger: ModuleLogger;
   /** Current unix timestamp (seconds). Used as `metadata_refreshed_at`. */
   now: number;
@@ -67,12 +71,16 @@ const eqCity = (a: string, b: string) =>
   a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
-  const { pubkeys, stakewiz, validatorsApp, logger, now } = input;
+  const { pubkeys, stakewiz, validatorsApp, ibrl, logger, now } = input;
   const out: ValidatorRow[] = [];
 
   for (const pubkey of pubkeys) {
     const sw = stakewiz.get(pubkey);
     const va = validatorsApp.get(pubkey);
+    // IBRL is keyed by NODE identity, not vote pubkey. Get the identity from
+    // Stakewiz/VA (whichever knows it) and look up there.
+    const identity = sw?.identity ?? va?.account ?? null;
+    const ib = identity && ibrl ? ibrl.get(identity) : undefined;
 
     // Country: ISO-2, exact-match comparison.
     const country = pickField<string>(logger, pubkey, 'country', sw?.ip_country, va?.country, eqExact);
@@ -128,6 +136,9 @@ export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
       client_version: va?.software_version ?? null,
       is_jito: va?.jito != null ? (va.jito ? 1 : 0) : null,
       is_dz: va?.is_dz != null ? (va.is_dz ? 1 : 0) : null,
+      // IBRL: typeof check (vs ?? null) because 0 is a valid score but unlikely;
+      // null means "no blocks produced this epoch" so we have no signal.
+      ibrl_score: ib != null ? ib.ibrl_score : null,
     });
   }
 
