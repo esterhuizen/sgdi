@@ -184,35 +184,42 @@ export default async function LocationsPage() {
                 the headline rarity.
               </li>
               <li>
-                <strong className="text-ink">Performance</strong> is the simple
-                arithmetic mean of{' '}
+                <strong className="text-ink">Operator score</strong> and{' '}
+                <strong className="text-ink">IBRL</strong> are both 0–100 means
+                across the validators at this location, but they measure
+                different things — read them together rather than picking one.
+              </li>
+              <li>
+                <strong className="text-ink">Operator score</strong> is the
+                simple arithmetic mean of{' '}
                 <a href="https://api.stakewiz.com" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">
                   Stakewiz
                 </a>
-                &apos;s <code className="rounded bg-bg-muted px-1 py-0.5">wiz_score</code>{' '}
-                (0–100) across the validators at this location. Captures vote
-                success, skip rate, uptime, commission, and the operator&apos;s
-                info-completeness — a real composite of "do these validators
-                actually deliver". Equal-weighted per operator (not stake-
-                weighted) so a single whale doesn&apos;t dominate the typical-
-                infra signal. <em>Caveat:</em> reflects the validators currently
-                there; a new validator moving in inherits the location, not the
-                score.
+                &apos;s <code className="rounded bg-bg-muted px-1 py-0.5">wiz_score</code>.
+                Captures the <em>operator&apos;s</em> competence: vote success,
+                skip rate, uptime, commission, info-completeness. Same DC, two
+                operators — scores can diverge widely. Use as a sanity check on
+                the location: if everyone here scores poorly, something&apos;s
+                wrong with the people or the infra.
               </li>
               <li>
                 <strong className="text-ink">IBRL</strong> (
                 <a href="https://ibrl.wtf/methodology/" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">
                   Increase Bandwidth, Reduce Latency
                 </a>
-                ) is the simple arithmetic mean of Jito&apos;s IBRL block-build
-                score (0–100) across the validators at this location. Weights
-                non-vote packing (45%), slot time (40%), and vote packing
-                (15%) — measures how efficiently each validator builds blocks
-                when it&apos;s the leader. More directly tied to network and DC
-                quality than wiz_score, which is why it&apos;s shown alongside.
-                Validators that produced no blocks this epoch are excluded
-                rather than counted as zero, and a dash means nobody at this
-                tuple had a score.
+                ) is the mean of Jito&apos;s block-build score, weighted
+                non-vote packing (45%), slot time (40%), vote packing (15%).
+                Captures the <em>network and DC</em> quality — almost pure
+                latency / bandwidth signal once you control for operator. This
+                is the one most directly tied to a hosting decision: a new
+                validator moving in inherits the location&apos;s IBRL much more
+                than its Operator score. Validators with no blocks this epoch
+                are excluded; a dash means nobody here had a score.
+              </li>
+              <li>
+                Both means are equal-weighted per operator (not stake-weighted)
+                so a single whale doesn&apos;t dominate the typical-infra
+                signal.
               </li>
               <li>
                 <strong className="text-ink">On DZ</strong>{' '}

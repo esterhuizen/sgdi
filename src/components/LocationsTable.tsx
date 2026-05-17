@@ -177,11 +177,11 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                 ASN
               </SortHeader>
               <SortHeader field="performance" active={sortField === 'performance'} dir={sortDir} onSort={toggleSort} align="right"
-                title="Avg Stakewiz wiz_score across validators at this location (0-100)">
-                Performance
+                title="Operator score — avg Stakewiz wiz_score across validators at this location (0–100). Captures operator competence: vote success, skip rate, uptime, commission.">
+                Operator score
               </SortHeader>
               <SortHeader field="ibrl" active={sortField === 'ibrl'} dir={sortDir} onSort={toggleSort} align="right"
-                title="Avg IBRL block-build quality score (Jito) across validators at this location (0-100)">
+                title="IBRL — avg Jito block-build quality score (0–100). Captures network/DC quality: non-vote packing, slot time, vote packing.">
                 IBRL
               </SortHeader>
               <SortHeader field="validators" active={sortField === 'validators'} dir={sortDir} onSort={toggleSort} align="right">
