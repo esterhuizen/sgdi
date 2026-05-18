@@ -25,6 +25,11 @@ export type EnrichmentInput = {
   /** IBRL validators keyed by `identity` (node identity, not vote pubkey).
    *  Optional — caller may omit if the IBRL fetch failed. */
   ibrl?: ReadonlyMap<string, IbrlValidator>;
+  /** Set of Solana validator IDENTITY pubkeys currently registered as
+   *  Activated on the DoubleZero mainnet ledger. Authoritative source for
+   *  `is_dz`. Optional — when omitted (e.g. DZ fetch failed) we leave the
+   *  existing DB value via COALESCE upsert rather than overwrite with null. */
+  doubleZeroIdentities?: ReadonlySet<string>;
   logger: ModuleLogger;
   /** Current unix timestamp (seconds). Used as `metadata_refreshed_at`. */
   now: number;
@@ -71,7 +76,7 @@ const eqCity = (a: string, b: string) =>
   a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
-  const { pubkeys, stakewiz, validatorsApp, ibrl, logger, now } = input;
+  const { pubkeys, stakewiz, validatorsApp, ibrl, doubleZeroIdentities, logger, now } = input;
   const out: ValidatorRow[] = [];
 
   for (const pubkey of pubkeys) {
@@ -129,13 +134,21 @@ export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
       image_url: sw?.image ?? null,
       // Client diversity (gdi-1.2 phase 1). Validators.app is the only source
       // with a curated `software_client` label (Agave / JitoLabs / Frankendancer
-      // / Firedancer / HarmonicAgave / Rakurai / …). For operational flags
-      // (is_jito, is_dz) validators.app is also authoritative — both are
-      // partially on-chain-verifiable from validator behaviour.
+      // / Firedancer / HarmonicAgave / Rakurai / …) and for is_jito.
+      // is_dz: switched away from validators.app (unreliable — missed major
+      // operators like Galaxy/Ledger-by-Figment, falsely included Everstake/
+      // Drift). Source is now the DoubleZero mainnet ledger directly: a
+      // validator is on DZ iff its identity pubkey has an Activated User
+      // account in the serviceability program. Same record DZ Foundation
+      // uses to bill the 5% fee, so validators don't keep it if they're
+      // not actually connected.
       client_name: va?.software_client ?? null,
       client_version: va?.software_version ?? null,
       is_jito: va?.jito != null ? (va.jito ? 1 : 0) : null,
-      is_dz: va?.is_dz != null ? (va.is_dz ? 1 : 0) : null,
+      is_dz:
+        doubleZeroIdentities && identity
+          ? (doubleZeroIdentities.has(identity) ? 1 : 0)
+          : null,
       // IBRL: typeof check (vs ?? null) because 0 is a valid score but unlikely;
       // null means "no blocks produced this epoch" so we have no signal.
       ibrl_score: ib != null ? ib.ibrl_score : null,

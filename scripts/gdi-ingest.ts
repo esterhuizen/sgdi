@@ -38,6 +38,7 @@ import {
 import { createStakewiz } from '../src/lib/gdi/data-sources/stakewiz.ts';
 import { createValidatorsApp } from '../src/lib/gdi/data-sources/validators-app.ts';
 import { createIbrl } from '../src/lib/gdi/data-sources/ibrl.ts';
+import { createDoubleZero } from '../src/lib/gdi/data-sources/doublezero.ts';
 import { createJupiter, buildMintNameMap } from '../src/lib/gdi/data-sources/jupiter.ts';
 import { enrichValidators } from '../src/lib/gdi/enrichment.ts';
 import {
@@ -178,6 +179,7 @@ async function main() {
   const stakewiz = createStakewiz({ logger: logger.forModule('stakewiz') });
   const validatorsApp = createValidatorsApp({ logger: logger.forModule('validators-app') });
   const ibrl = createIbrl({ logger: logger.forModule('ibrl') });
+  const doubleZero = createDoubleZero({ logger: logger.forModule('doublezero') });
   const jupiter = createJupiter({ logger: logger.forModule('jupiter') });
 
   log.info('start', { run_id: logger.runId });
@@ -210,6 +212,13 @@ async function main() {
         log.warn('ibrl.fetch.failed', { error: errMessage(e) });
         return [];
       });
+      // is_dz source of truth: DZ mainnet ledger directly. If the fetch fails
+      // we pass `undefined` so enrichment leaves is_dz null and the COALESCE
+      // upsert preserves the last known DB value.
+      const dzIdentities = await doubleZero.fetchActiveValidatorIdentities().catch((e) => {
+        log.warn('doublezero.fetch.failed', { error: errMessage(e) });
+        return undefined;
+      });
       const stakewizMap = new Map(swData.map((v) => [v.vote_identity, v]));
       const vaMap = new Map(vaData.map((v) => [v.vote_account, v]));
       const ibrlMap = new Map(ibrlData.map((v) => [v.identity, v]));
@@ -220,6 +229,7 @@ async function main() {
         stakewiz: stakewizMap,
         validatorsApp: vaMap,
         ibrl: ibrlMap,
+        doubleZeroIdentities: dzIdentities,
         logger: logger.forModule('enrichment'),
         now: nowSeconds(),
       });
@@ -383,6 +393,14 @@ async function main() {
     return [];
   });
 
+  // DoubleZero identity set — sole source of truth for is_dz. On fetch
+  // failure we pass undefined so enrichment doesn't touch the existing flag
+  // (COALESCE upsert preserves last good value).
+  const dzIdentities = await doubleZero.fetchActiveValidatorIdentities().catch((e) => {
+    log.warn('doublezero.fetch.failed', { error: errMessage(e) });
+    return undefined;
+  });
+
   const stakewizMap = new Map(stakewizData.map((v) => [v.vote_identity, v]));
   const vaMap = new Map(vaData.map((v) => [v.vote_account, v]));
   const ibrlMap = new Map(ibrlData.map((v) => [v.identity, v]));
@@ -403,6 +421,7 @@ async function main() {
     stakewiz: stakewizMap,
     validatorsApp: vaMap,
     ibrl: ibrlMap,
+    doubleZeroIdentities: dzIdentities,
     logger: logger.forModule('enrichment'),
     now: nowSeconds(),
   });
