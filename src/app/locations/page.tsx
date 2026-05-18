@@ -42,6 +42,7 @@ function aggregateTuples(rows: readonly ValidatorIndexEntry[]): TupleRow[] {
   type Agg = TupleRow & {
     _wizSum: number; _wizN: number;
     _ibrlSum: number; _ibrlN: number;
+    _ibrlMax: number;
   };
   const tuples = new Map<string, Agg>();
   for (const v of rows) {
@@ -64,10 +65,12 @@ function aggregateTuples(rows: readonly ValidatorIndexEntry[]): TupleRow[] {
         totalStakeSol: 0,
         avgWizScore: null,
         avgIbrlScore: null,
+        maxIbrlScore: null,
         _wizSum: 0,
         _wizN: 0,
         _ibrlSum: 0,
         _ibrlN: 0,
+        _ibrlMax: 0,
       };
       tuples.set(key, t);
     }
@@ -86,13 +89,17 @@ function aggregateTuples(rows: readonly ValidatorIndexEntry[]): TupleRow[] {
     if (typeof v.ibrl_score === 'number' && Number.isFinite(v.ibrl_score)) {
       t._ibrlSum += v.ibrl_score;
       t._ibrlN += 1;
+      if (v.ibrl_score > t._ibrlMax) t._ibrlMax = v.ibrl_score;
     }
   }
   // Finalise: compute means, strip internal sums before returning.
-  return [...tuples.values()].map(({ _wizSum, _wizN, _ibrlSum, _ibrlN, ...t }) => ({
+  return [...tuples.values()].map(({ _wizSum, _wizN, _ibrlSum, _ibrlN, _ibrlMax, ...t }) => ({
     ...t,
     avgWizScore: _wizN > 0 ? _wizSum / _wizN : null,
     avgIbrlScore: _ibrlN > 0 ? _ibrlSum / _ibrlN : null,
+    // Max only meaningful when >1 IBRL data point; otherwise max == avg, no
+    // extra signal. Null suppresses the "max N" subtext in the table cell.
+    maxIbrlScore: _ibrlN > 1 ? _ibrlMax : null,
   }));
 }
 

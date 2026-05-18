@@ -28,6 +28,11 @@ export type TupleRow = {
   /** Simple (unweighted) mean of IBRL score across validators that produced
    *  ≥1 block this epoch. null when nobody at the tuple has a score. */
   avgIbrlScore: number | null;
+  /** Highest IBRL score across the validators at this tuple. Proxy for
+   *  the location's *capability* (what a well-configured operator could
+   *  achieve there) — the avg can be dragged down by weak operators.
+   *  null when ≤1 IBRL data point (max == avg, no extra signal). */
+  maxIbrlScore: number | null;
 };
 
 type SortField = 'composite' | 'country' | 'city' | 'asn' | 'performance' | 'ibrl' | 'validators' | 'dz' | 'stake';
@@ -103,18 +108,29 @@ function SortHeader({
 
 export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
   const [dzOnly, setDzOnly] = useState(true);
+  const [minIbrl, setMinIbrl] = useState(0);
   const [sortField, setSortField] = useState<SortField>('composite');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [showAll, setShowAll] = useState(false);
 
   const filtered = useMemo(() => {
-    const cleaned = tuples.filter(
+    let cleaned = tuples.filter(
       (t) => t.country && t.city && t.asnId &&
              t.country.toLowerCase() !== 'unknown' &&
              t.asnId.toLowerCase() !== 'unknown',
     );
-    return dzOnly ? cleaned.filter((t) => t.dzCount > 0) : cleaned;
-  }, [tuples, dzOnly]);
+    if (dzOnly) cleaned = cleaned.filter((t) => t.dzCount > 0);
+    // Min-IBRL is an absolute floor against the location's avg IBRL. Tuples
+    // with no IBRL data (avgIbrlScore == null) are dropped when minIbrl > 0
+    // — the operator asked for proven quality and we can't make that claim
+    // for a location without measurements.
+    if (minIbrl > 0) {
+      cleaned = cleaned.filter(
+        (t) => t.avgIbrlScore != null && t.avgIbrlScore >= minIbrl,
+      );
+    }
+    return cleaned;
+  }, [tuples, dzOnly, minIbrl]);
 
   const sorted = useMemo(() => {
     const sign = sortDir === 'desc' ? -1 : 1;
@@ -134,7 +150,7 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
 
   return (
     <>
-      <div className="mt-8 flex items-center gap-3">
+      <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
         <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -144,11 +160,29 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
           />
           <span className="text-ink">DoubleZero-supported locations only</span>
         </label>
-        <span className="text-xs text-ink-dim">
-          ({dzOnly
-            ? 'showing only tuples where at least one existing validator runs DZ'
-            : 'showing all tuples, including those with zero DZ presence'})
-        </span>
+        <label className="inline-flex items-center gap-3 text-sm"
+          title="Filter to locations whose avg IBRL meets this floor. Locations with no IBRL data are excluded when the floor is > 0.">
+          <span className="text-ink whitespace-nowrap">Min IBRL</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={minIbrl}
+            onChange={(e) => setMinIbrl(Number(e.target.value))}
+            className="h-1 w-32 accent-ink"
+          />
+          <span className="num w-8 text-right text-ink tabular-nums">{minIbrl}</span>
+        </label>
+        {minIbrl > 0 && (
+          <button
+            type="button"
+            onClick={() => setMinIbrl(0)}
+            className="text-xs text-ink-dim hover:text-ink"
+          >
+            clear
+          </button>
+        )}
       </div>
 
       <div className="mt-2 text-sm text-ink-dim">
@@ -227,7 +261,10 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                   </div>
                 </td>
                 <td className="num py-3 pr-3 text-right text-ink tabular-nums">
-                  {fmt.num(r.avgIbrlScore, 1)}
+                  <div>{fmt.num(r.avgIbrlScore, 1)}</div>
+                  {r.maxIbrlScore != null && (
+                    <div className="text-xs text-ink-dim tabular-nums">max {fmt.num(r.maxIbrlScore, 1)}</div>
+                  )}
                 </td>
                 <td className="num py-3 pr-3 text-right text-ink tabular-nums">
                   {fmt.num(r.avgWizScore, 1)}
