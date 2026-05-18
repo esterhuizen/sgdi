@@ -176,13 +176,13 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                 title="Sort by ASN rarity">
                 ASN
               </SortHeader>
-              <SortHeader field="performance" active={sortField === 'performance'} dir={sortDir} onSort={toggleSort} align="right"
-                title="Operator score — avg Stakewiz wiz_score across validators at this location (0–100). Captures operator competence: vote success, skip rate, uptime, commission.">
-                Operator score
-              </SortHeader>
               <SortHeader field="ibrl" active={sortField === 'ibrl'} dir={sortDir} onSort={toggleSort} align="right"
                 title="IBRL — avg Jito block-build quality score (0–100). Captures network/DC quality: non-vote packing, slot time, vote packing.">
                 IBRL
+              </SortHeader>
+              <SortHeader field="performance" active={sortField === 'performance'} dir={sortDir} onSort={toggleSort} align="right"
+                title="Operator score — avg Stakewiz wiz_score across validators at this location (0–100). Captures operator competence: vote success, skip rate, uptime, commission.">
+                Operator score
               </SortHeader>
               <SortHeader field="validators" active={sortField === 'validators'} dir={sortDir} onSort={toggleSort} align="right">
                 Validators
@@ -227,10 +227,10 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                   </div>
                 </td>
                 <td className="num py-3 pr-3 text-right text-ink tabular-nums">
-                  {fmt.num(r.avgWizScore, 1)}
+                  {fmt.num(r.avgIbrlScore, 1)}
                 </td>
                 <td className="num py-3 pr-3 text-right text-ink tabular-nums">
-                  {fmt.num(r.avgIbrlScore, 1)}
+                  {fmt.num(r.avgWizScore, 1)}
                 </td>
                 <td className="num py-3 pr-3 text-right text-ink-muted tabular-nums">
                   {r.validatorCount}
