@@ -165,7 +165,20 @@ export type PoolSnapshot = {
   epoch: number;
   pool_address: string;
   validator_pubkey: string;
+  /** Active stake on the validator's stake account at snapshot time (lamports). */
   stake_lamports: bigint;
+  /** SPL stake pool transient stake — in-flight increase or decrease that
+   *  settles at the next epoch boundary. NULL on rows pre-dating the
+   *  migration. 0 means "no in-flight move". */
+  transient_stake_lamports: bigint | null;
+  /** SPL stake pool ValidatorStakeInfo.status byte:
+   *    0 = Active            (transient>0 means an IncreaseValidatorStake is in flight)
+   *    1 = DeactivatingTransient (transient is a DecreaseValidatorStake in flight)
+   *    2 = ReadyForRemoval
+   *    3 = DeactivatingValidator
+   *    4 = DeactivatingAll
+   *  NULL on rows pre-dating the migration. */
+  validator_status: number | null;
   captured_at: number;
 };
 
@@ -250,6 +263,11 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     addColumn('validators', 'ibrl_score',               'REAL');
     // BAM (Block Assembly Marketplace, Jito) participation flag — additive.
     addColumn('validators', 'is_bam',                   'INTEGER');
+    // SPL stake pool transient stake + validator status — additive on
+    // pool_snapshots. Lets the optimizer reason about in-flight stake moves
+    // (active + transient activating; status disambiguates direction).
+    addColumn('pool_snapshots', 'transient_stake_lamports', 'INTEGER');
+    addColumn('pool_snapshots', 'validator_status',         'INTEGER');
   }
 
   const stmt = {
@@ -330,8 +348,12 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
       `DELETE FROM pool_snapshots WHERE epoch = ? AND pool_address = ?`,
     ),
     insertSnapshot: db.prepare(`
-      INSERT INTO pool_snapshots (epoch, pool_address, validator_pubkey, stake_lamports, captured_at)
-      VALUES (@epoch, @pool_address, @validator_pubkey, @stake_lamports, @captured_at)
+      INSERT INTO pool_snapshots
+        (epoch, pool_address, validator_pubkey,
+         stake_lamports, transient_stake_lamports, validator_status, captured_at)
+      VALUES
+        (@epoch, @pool_address, @validator_pubkey,
+         @stake_lamports, @transient_stake_lamports, @validator_status, @captured_at)
     `),
     listSnapshotsForPoolEpoch: db.prepare(`
       SELECT * FROM pool_snapshots
@@ -413,7 +435,13 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
   function replaceSnapshotsForPoolEpoch(
     epoch: number,
     poolAddress: string,
-    snapshots: { validator_pubkey: string; stake_lamports: bigint; captured_at: number }[],
+    snapshots: {
+      validator_pubkey: string;
+      stake_lamports: bigint;
+      transient_stake_lamports: bigint;
+      validator_status: number;
+      captured_at: number;
+    }[],
   ): void {
     const tx = db.transaction(() => {
       stmt.deleteSnapshotsForPoolEpoch.run(epoch, poolAddress);
@@ -423,6 +451,8 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
           pool_address: poolAddress,
           validator_pubkey: s.validator_pubkey,
           stake_lamports: s.stake_lamports,
+          transient_stake_lamports: s.transient_stake_lamports,
+          validator_status: s.validator_status,
           captured_at: s.captured_at,
         });
       }

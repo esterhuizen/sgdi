@@ -276,6 +276,11 @@ async function main() {
         d.delegations.map((v) => ({
           validator_pubkey: v.votePubkey,
           stake_lamports: v.activeStakeLamports,
+          // Transient + status let the optimizer reason about in-flight
+          // stake moves. Both come from the same ValidatorList decode that
+          // already produced activeStakeLamports.
+          transient_stake_lamports: v.transientStakeLamports,
+          validator_status: v.status,
           captured_at: startedAt,
         })),
       );
