@@ -148,11 +148,14 @@ export type ValidatorRow = {
   activated_stake_lamports: number | null;
   delinquent: number | null;       // 0 / 1; null = unknown
   image_url: string | null;
-  // Client diversity (gdi-1.2 phase 1) — sourced from validators.app.
-  client_name: string | null;      // e.g. "Agave", "JitoLabs", "Frankendancer"
-  client_version: string | null;   // e.g. "3.1.13", "0.820.30113"
+  // Client diversity. client_name + client_version now derived from
+  // getClusterNodes (Solana RPC) instead of validators.app — covers 100% of
+  // gossip-visible validators and is unaffected by VA's label collapse.
+  client_name: string | null;      // "Agave" (2.x/3.x/4.x) | "Frankendancer" (0.8xx) | other
+  client_version: string | null;   // raw version string from gossip
   is_jito: number | null;          // 0 / 1; null = unknown
   is_dz: number | null;            // 0 / 1; null = unknown — DoubleZero network participation
+  is_bam: number | null;           // 0 / 1; null = unknown — BAM (Jito Block Assembly Marketplace) participation
   // IBRL block-build quality score (Jito explorer.bam.dev). 0-100, null when
   // the validator hasn't produced blocks in the current epoch.
   ibrl_score: number | null;
@@ -245,6 +248,8 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     addColumn('validators', 'is_dz',                    'INTEGER');
     // IBRL block-build quality score (Jito) — additive.
     addColumn('validators', 'ibrl_score',               'REAL');
+    // BAM (Block Assembly Marketplace, Jito) participation flag — additive.
+    addColumn('validators', 'is_bam',                   'INTEGER');
   }
 
   const stmt = {
@@ -279,13 +284,13 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
          country_source, city_source, asn_source, metadata_refreshed_at,
          stakewiz_wiz_score, stakewiz_city_concentration, stakewiz_asn_concentration, stakewiz_refreshed_at,
          activated_stake_lamports, delinquent, image_url,
-         client_name, client_version, is_jito, is_dz, ibrl_score)
+         client_name, client_version, is_jito, is_dz, ibrl_score, is_bam)
       VALUES
         (@validator_pubkey, @identity_pubkey, @identity_name, @country, @city, @asn, @asn_name, @datacenter,
          @country_source, @city_source, @asn_source, @metadata_refreshed_at,
          @stakewiz_wiz_score, @stakewiz_city_concentration, @stakewiz_asn_concentration, @stakewiz_refreshed_at,
          @activated_stake_lamports, @delinquent, @image_url,
-         @client_name, @client_version, @is_jito, @is_dz, @ibrl_score)
+         @client_name, @client_version, @is_jito, @is_dz, @ibrl_score, @is_bam)
       ON CONFLICT(validator_pubkey) DO UPDATE SET
         identity_pubkey             = COALESCE(excluded.identity_pubkey,             validators.identity_pubkey),
         identity_name               = COALESCE(excluded.identity_name,               validators.identity_name),
@@ -311,7 +316,8 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         client_version              = COALESCE(excluded.client_version,              validators.client_version),
         is_jito                     = COALESCE(excluded.is_jito,                     validators.is_jito),
         is_dz                       = COALESCE(excluded.is_dz,                       validators.is_dz),
-        ibrl_score                  = COALESCE(excluded.ibrl_score,                  validators.ibrl_score)
+        ibrl_score                  = COALESCE(excluded.ibrl_score,                  validators.ibrl_score),
+        is_bam                      = COALESCE(excluded.is_bam,                      validators.is_bam)
     `),
     getValidator: db.prepare(`SELECT * FROM validators WHERE validator_pubkey = ?`),
     listAllValidators: db.prepare(`SELECT * FROM validators`),

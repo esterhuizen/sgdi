@@ -80,11 +80,14 @@ function formatValidator(v: ValidatorRow) {
     asn: v.asn,
     asn_name: v.asn_name,
     datacenter: v.datacenter,
-    // Client diversity fields (gdi-1.2 phase 1) — sourced from validators.app.
+    // Client family + version: from getClusterNodes (Anza/Jump version strings).
+    // Operational flags: is_jito (validators.app jito tip activity), is_dz
+    // (DZ ledger), is_bam (BAM public API).
     client_name: v.client_name,
     client_version: v.client_version,
     is_jito: v.is_jito === null ? null : v.is_jito === 1,
     is_dz: v.is_dz === null ? null : v.is_dz === 1,
+    is_bam: v.is_bam === null ? null : v.is_bam === 1,
     sources: {
       country: v.country_source,
       city: v.city_source,
@@ -116,7 +119,7 @@ function formatValidator(v: ValidatorRow) {
  */
 type ClientDistribution = {
   by_client: { client: string; stake_sol: number; stake_share: number; validator_count: number }[];
-  operational: { jito_share: number; dz_share: number };
+  operational: { jito_share: number; dz_share: number; bam_share: number };
   effective_clients: number | null;
   unclassified: { stake_sol: number; stake_share: number };
 };
@@ -128,7 +131,7 @@ function computePoolClientDistribution(
   if (total <= 0) {
     return {
       by_client: [],
-      operational: { jito_share: 0, dz_share: 0 },
+      operational: { jito_share: 0, dz_share: 0, bam_share: 0 },
       effective_clients: null,
       unclassified: { stake_sol: 0, stake_share: 0 },
     };
@@ -139,6 +142,7 @@ function computePoolClientDistribution(
   let unclassifiedStake = 0;
   let jitoStake = 0;
   let dzStake = 0;
+  let bamStake = 0;
 
   for (const v of validatorStakeSol) {
     const label = v.row?.client_name ?? null;
@@ -152,6 +156,7 @@ function computePoolClientDistribution(
     }
     if (v.row?.is_jito === 1) jitoStake += v.stake_sol;
     if (v.row?.is_dz === 1) dzStake += v.stake_sol;
+    if (v.row?.is_bam === 1) bamStake += v.stake_sol;
   }
 
   const by_client = [...tally.entries()]
@@ -181,6 +186,7 @@ function computePoolClientDistribution(
     operational: {
       jito_share: jitoStake / total,
       dz_share: dzStake / total,
+      bam_share: bamStake / total,
     },
     effective_clients,
     unclassified: {
@@ -347,6 +353,7 @@ async function main() {
         client_version: v?.client_version ?? null,
         is_jito: v?.is_jito === null || v?.is_jito === undefined ? null : v.is_jito === 1,
         is_dz: v?.is_dz === null || v?.is_dz === undefined ? null : v.is_dz === 1,
+        is_bam: v?.is_bam === null || v?.is_bam === undefined ? null : v.is_bam === 1,
       };
     });
 
@@ -416,9 +423,14 @@ async function main() {
     rarity_city: number | null;
     rarity_asn: number | null;
     composite_rarity: number | null;
-    // gdi-1.2 phase 1 — operational flags powering /locations dashboard.
+    // Operational flags powering /locations dashboard and pool pages.
     is_dz: boolean | null;
     is_jito: boolean | null;
+    is_bam: boolean | null;
+    // Coarse client family (Agave / Frankendancer / null) derived from
+    // getClusterNodes gossip version.
+    client_name: string | null;
+    client_version: string | null;
     // Stakewiz composite performance score (0-100) — vote success, skip rate,
     // uptime, commission, info score, concentration penalties. Surfaced on
     // /locations as the per-location "Performance" column.
@@ -469,6 +481,9 @@ async function main() {
       composite_rarity: null,
       is_dz: v.is_dz == null ? null : v.is_dz === 1,
       is_jito: v.is_jito == null ? null : v.is_jito === 1,
+      is_bam: v.is_bam == null ? null : v.is_bam === 1,
+      client_name: v.client_name,
+      client_version: v.client_version,
       wiz_score: v.stakewiz_wiz_score,
       ibrl_score: v.ibrl_score,
     });

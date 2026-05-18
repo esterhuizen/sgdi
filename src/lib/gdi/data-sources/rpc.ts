@@ -159,6 +159,25 @@ export function createRpc({ url, timeoutMs = 30_000, logger }: RpcOptions) {
       }>('getAccountInfo', [pubkey, { encoding: 'base64', dataSlice: { offset: 0, length: 0 } }]);
       return r?.value?.owner ?? null;
     },
+
+    /**
+     * All cluster gossip-visible nodes with their reported version strings.
+     * Used for client-software detection: version "3.x" / "4.x" / "2.x" =
+     * Agave-family; "0.8xx.xxxxx" = Frankendancer / Firedancer.
+     * Keyed by node IDENTITY pubkey.
+     */
+    async getClusterNodes(): Promise<
+      Array<{ pubkey: string; version: string | null; featureSet: number | null }>
+    > {
+      const r = await call<
+        Array<{ pubkey: string; version?: string | null; featureSet?: number | null }>
+      >('getClusterNodes', []);
+      return r.map((n) => ({
+        pubkey: n.pubkey,
+        version: n.version ?? null,
+        featureSet: n.featureSet ?? null,
+      }));
+    },
   };
 }
 

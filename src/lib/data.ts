@@ -77,17 +77,18 @@ export type PoolValidator = {
   asn: string | null;
   asn_name: string | null;
   wiz_score: number | null;
-  // gdi-1.2 phase 1 fields — present when validators.app classifies the validator
+  // Client family + version (from getClusterNodes) + operational flags.
   client_name?: string | null;
   client_version?: string | null;
   is_jito?: boolean | null;
   is_dz?: boolean | null;
+  is_bam?: boolean | null;
 };
 
 // Stake-weighted client breakdown per pool. Published by gdi-publish.
 export type ClientDistribution = {
   by_client: { client: string; stake_sol: number; stake_share: number; validator_count: number }[];
-  operational: { jito_share: number; dz_share: number };
+  operational: { jito_share: number; dz_share: number; bam_share: number };
   effective_clients: number | null;
   unclassified: { stake_sol: number; stake_share: number };
 };
@@ -144,6 +145,10 @@ export type ValidatorIndexEntry = {
   // Operational flags surfaced for the /locations dashboard.
   is_dz?: boolean | null;
   is_jito?: boolean | null;
+  is_bam?: boolean | null;
+  // Coarse client family (Agave / Frankendancer / null) — from gossip version.
+  client_name?: string | null;
+  client_version?: string | null;
   // Stakewiz composite performance score (0-100). Optional for backwards
   // compat with older published JSON that pre-dates the field.
   wiz_score?: number | null;

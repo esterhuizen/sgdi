@@ -39,6 +39,7 @@ import { createStakewiz } from '../src/lib/gdi/data-sources/stakewiz.ts';
 import { createValidatorsApp } from '../src/lib/gdi/data-sources/validators-app.ts';
 import { createIbrl } from '../src/lib/gdi/data-sources/ibrl.ts';
 import { createDoubleZero } from '../src/lib/gdi/data-sources/doublezero.ts';
+import { createBam } from '../src/lib/gdi/data-sources/bam.ts';
 import { createJupiter, buildMintNameMap } from '../src/lib/gdi/data-sources/jupiter.ts';
 import { enrichValidators } from '../src/lib/gdi/enrichment.ts';
 import {
@@ -180,6 +181,7 @@ async function main() {
   const validatorsApp = createValidatorsApp({ logger: logger.forModule('validators-app') });
   const ibrl = createIbrl({ logger: logger.forModule('ibrl') });
   const doubleZero = createDoubleZero({ logger: logger.forModule('doublezero') });
+  const bam = createBam({ logger: logger.forModule('bam') });
   const jupiter = createJupiter({ logger: logger.forModule('jupiter') });
 
   log.info('start', { run_id: logger.runId });
@@ -219,6 +221,18 @@ async function main() {
         log.warn('doublezero.fetch.failed', { error: errMessage(e) });
         return undefined;
       });
+      // BAM connected identity set — sole source of truth for is_bam.
+      const bamIdentities = await bam.fetchConnectedIdentitySet().catch((e) => {
+        log.warn('bam.fetch.failed', { error: errMessage(e) });
+        return undefined;
+      });
+      // Cluster nodes — gossip version per identity. Source for client_name +
+      // client_version (replaces validators.app's broken software_client).
+      const clusterNodesData = await rpc.getClusterNodes().catch((e) => {
+        log.warn('cluster_nodes.fetch.failed', { error: errMessage(e) });
+        return [] as Array<{ pubkey: string; version: string | null }>;
+      });
+      const clusterNodesMap = new Map(clusterNodesData.map((n) => [n.pubkey, { version: n.version }]));
       const stakewizMap = new Map(swData.map((v) => [v.vote_identity, v]));
       const vaMap = new Map(vaData.map((v) => [v.vote_account, v]));
       const ibrlMap = new Map(ibrlData.map((v) => [v.identity, v]));
@@ -230,6 +244,8 @@ async function main() {
         validatorsApp: vaMap,
         ibrl: ibrlMap,
         doubleZeroIdentities: dzIdentities,
+        bamIdentities,
+        clusterNodes: clusterNodesMap,
         logger: logger.forModule('enrichment'),
         now: nowSeconds(),
       });
@@ -401,6 +417,20 @@ async function main() {
     return undefined;
   });
 
+  // BAM connected identity set — sole source of truth for is_bam.
+  const bamIdentities = await bam.fetchConnectedIdentitySet().catch((e) => {
+    log.warn('bam.fetch.failed', { error: errMessage(e) });
+    return undefined;
+  });
+
+  // Cluster nodes — gossip version per identity. Source for client_name +
+  // client_version (replaces validators.app's broken software_client).
+  const clusterNodesData = await rpc.getClusterNodes().catch((e) => {
+    log.warn('cluster_nodes.fetch.failed', { error: errMessage(e) });
+    return [] as Array<{ pubkey: string; version: string | null }>;
+  });
+  const clusterNodesMap = new Map(clusterNodesData.map((n) => [n.pubkey, { version: n.version }]));
+
   const stakewizMap = new Map(stakewizData.map((v) => [v.vote_identity, v]));
   const vaMap = new Map(vaData.map((v) => [v.vote_account, v]));
   const ibrlMap = new Map(ibrlData.map((v) => [v.identity, v]));
@@ -422,6 +452,8 @@ async function main() {
     validatorsApp: vaMap,
     ibrl: ibrlMap,
     doubleZeroIdentities: dzIdentities,
+    bamIdentities,
+    clusterNodes: clusterNodesMap,
     logger: logger.forModule('enrichment'),
     now: nowSeconds(),
   });

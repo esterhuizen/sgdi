@@ -30,10 +30,62 @@ export type EnrichmentInput = {
    *  `is_dz`. Optional — when omitted (e.g. DZ fetch failed) we leave the
    *  existing DB value via COALESCE upsert rather than overwrite with null. */
   doubleZeroIdentities?: ReadonlySet<string>;
+  /** Set of Solana validator IDENTITY pubkeys currently connected to BAM
+   *  (Block Assembly Marketplace, Jito). Authoritative source for `is_bam`. */
+  bamIdentities?: ReadonlySet<string>;
+  /** Map from IDENTITY pubkey → version string (from Solana getClusterNodes).
+   *  Source for `client_name` + `client_version`. */
+  clusterNodes?: ReadonlyMap<string, { version: string | null }>;
   logger: ModuleLogger;
   /** Current unix timestamp (seconds). Used as `metadata_refreshed_at`. */
   now: number;
 };
+
+/**
+ * Map (gossip version, is_jito, is_bam) to one of 5 client labels:
+ *
+ *   Agave         vanilla Anza Agave (2.x / 3.x / 4.x) — no Jito, no BAM
+ *   Jito          Agave-family with Jito tip-program activity
+ *   BAM           Agave-family connected to Jito's Block Assembly Marketplace
+ *   Frankendancer Jump's hybrid (Firedancer TPU + Agave runtime) — version 0.8xx
+ *   Firedancer    Pure Firedancer — version 0.0xx-0.7xx (placeholder; near-zero
+ *                 mainnet presence today, included for forward-compat)
+ *
+ * Priority for Agave-family: BAM > Jito > vanilla. BAM is more specific
+ * because BAM-connected validators run a Jito-derived stack — is_bam=true
+ * implies is_jito=true but not vice versa.
+ *
+ * For 0.x clients we don't override based on is_jito/is_bam: the version
+ * uniquely identifies the underlying software family regardless of operator
+ * add-ons. (A "JitoFrankendancer" would still be Frankendancer at the
+ * software-family level — Jito's mods sit alongside, not as a fork.)
+ */
+export function classifyClient(
+  version: string | null | undefined,
+  isJito: boolean,
+  isBam: boolean,
+): string | null {
+  if (!version) return null;
+
+  if (version.startsWith('0.')) {
+    // Frankendancer ships as 0.8xx (mainnet, 2025-2026). Pure Firedancer's
+    // mainnet versioning is still TBD; we tentatively reserve 0.0..0.7xx
+    // for it. Refine when pure FD validators show up.
+    const minor = parseInt(version.split('.')[1] ?? '0', 10);
+    if (minor >= 800) return 'Frankendancer';
+    return 'Firedancer';
+  }
+
+  // Agave-family: 2.x, 3.x, 4.x... Require a leading digit followed by a dot.
+  // Accepts pre-release suffixes like "4.0.0-rc.1".
+  if (/^[1-9]\d*\./.test(version)) {
+    if (isBam) return 'BAM';
+    if (isJito) return 'Jito';
+    return 'Agave';
+  }
+
+  return null;
+}
 
 type Source = 'stakewiz' | 'validators-app' | null;
 
@@ -76,7 +128,7 @@ const eqCity = (a: string, b: string) =>
   a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
-  const { pubkeys, stakewiz, validatorsApp, ibrl, doubleZeroIdentities, logger, now } = input;
+  const { pubkeys, stakewiz, validatorsApp, ibrl, doubleZeroIdentities, bamIdentities, clusterNodes, logger, now } = input;
   const out: ValidatorRow[] = [];
 
   for (const pubkey of pubkeys) {
@@ -132,22 +184,31 @@ export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
         sw?.activated_stake != null ? Math.floor(sw.activated_stake * 1e9) : null,
       delinquent: sw?.delinquent != null ? (sw.delinquent ? 1 : 0) : null,
       image_url: sw?.image ?? null,
-      // Client diversity (gdi-1.2 phase 1). Validators.app is the only source
-      // with a curated `software_client` label (Agave / JitoLabs / Frankendancer
-      // / Firedancer / HarmonicAgave / Rakurai / …) and for is_jito.
-      // is_dz: switched away from validators.app (unreliable — missed major
-      // operators like Galaxy/Ledger-by-Figment, falsely included Everstake/
-      // Drift). Source is now the DoubleZero mainnet ledger directly: a
-      // validator is on DZ iff its identity pubkey has an Activated User
-      // account in the serviceability program. Same record DZ Foundation
-      // uses to bill the 5% fee, so validators don't keep it if they're
-      // not actually connected.
-      client_name: va?.software_client ?? null,
-      client_version: va?.software_version ?? null,
+      // Client family + version: classified from (gossip version, is_jito,
+      // is_bam) into 5 buckets — Agave / Jito / BAM / Frankendancer /
+      // Firedancer. Version covers 100% of online validators (Solana
+      // getClusterNodes), unaffected by validators.app's label collapse.
+      // Operational flag sources:
+      //   is_jito: validators.app (jito tip program participation,
+      //     separate from the broken software_client field).
+      //   is_dz:   DZ mainnet ledger directly (authoritative).
+      //   is_bam:  BAM's public connected-validator API (authoritative).
+      client_name: identity
+        ? classifyClient(
+            clusterNodes?.get(identity)?.version,
+            va?.jito === true,
+            bamIdentities?.has(identity) ?? false,
+          )
+        : null,
+      client_version: identity ? (clusterNodes?.get(identity)?.version ?? null) : null,
       is_jito: va?.jito != null ? (va.jito ? 1 : 0) : null,
       is_dz:
         doubleZeroIdentities && identity
           ? (doubleZeroIdentities.has(identity) ? 1 : 0)
+          : null,
+      is_bam:
+        bamIdentities && identity
+          ? (bamIdentities.has(identity) ? 1 : 0)
           : null,
       // IBRL: typeof check (vs ?? null) because 0 is a valid score but unlikely;
       // null means "no blocks produced this epoch" so we have no signal.
