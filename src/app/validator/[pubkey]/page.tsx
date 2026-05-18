@@ -196,6 +196,36 @@ export default async function ValidatorDetailPage({ params }: Props) {
         </div>
       </section>
 
+      {/* Performance + client */}
+      <section className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="surface p-5"
+          title="Jito's IBRL — Increase Bandwidth, Reduce Latency. Stake-build quality this epoch: non-vote packing (45%), slot time (40%), vote packing (15%).">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">IBRL block-build</div>
+          <div className="num mt-2 text-3xl font-semibold text-ink">{fmt.num(v.ibrl_score, 1)}</div>
+          <div className="mt-1 text-xs text-ink-dim">Jito 0–100, this epoch</div>
+        </div>
+        <div className="surface p-5"
+          title="Stakewiz wiz_score — composite of vote success, skip rate, uptime, commission, info completeness, concentration penalties.">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">Operator score</div>
+          <div className="num mt-2 text-3xl font-semibold text-ink">{fmt.num(v.wiz_score, 1)}</div>
+          <div className="mt-1 text-xs text-ink-dim">Stakewiz 0–100</div>
+        </div>
+        <div className="surface p-5">
+          <div className="text-xs uppercase tracking-wider text-ink-dim">Client</div>
+          <div className="mt-2 text-3xl font-semibold text-ink">{v.client_name ?? '—'}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-dim">
+            {v.client_version && (
+              <span className="font-mono">{v.client_version}</span>
+            )}
+            {v.is_dz === true && (
+              <span className="rounded-full bg-success/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-success">
+                DoubleZero
+              </span>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* Per-dimension breakdown */}
       <section className="mt-10 max-w-3xl">
         <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-dim">
