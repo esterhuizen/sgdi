@@ -319,7 +319,7 @@ export default async function HomePage() {
             <span aria-hidden>·</span>
             <a href="https://www.validators.app" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Validators.app</a>
             <span aria-hidden>·</span>
-            <a href="https://explorer.bam.dev" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Jito BAM</a>
+            <a href="https://bam.dev/explorer/" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Jito BAM</a>
             <span aria-hidden>·</span>
             <a href="https://ibrl.wtf" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Jito IBRL</a>
             <span aria-hidden>·</span>
