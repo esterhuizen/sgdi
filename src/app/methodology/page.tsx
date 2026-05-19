@@ -230,10 +230,30 @@ export default function MethodologyPage() {
               <td className="py-2 pr-4">IP-derived country / city / ASN; activated stake; wiz_score</td>
               <td className="py-2">Primary for location + network shares</td>
             </tr>
-            <tr>
+            <tr className="border-b border-ring">
               <td className="py-2 pr-4 font-medium text-ink">Validators.app</td>
-              <td className="py-2 pr-4">Cross-reference for validator metadata</td>
-              <td className="py-2">Fallback / disagreement check</td>
+              <td className="py-2 pr-4">Cross-reference for validator metadata; software_client labels (Agave, AgaveBam, Frankendancer, JitoLabs, Firedancer, …)</td>
+              <td className="py-2">Primary for client labels; fallback for location</td>
+            </tr>
+            <tr className="border-b border-ring">
+              <td className="py-2 pr-4 font-medium text-ink">Jito BAM</td>
+              <td className="py-2 pr-4">Block Assembly Marketplace connected-validator list (<code>is_bam</code> operational flag)</td>
+              <td className="py-2">Authoritative (BAM public API)</td>
+            </tr>
+            <tr className="border-b border-ring">
+              <td className="py-2 pr-4 font-medium text-ink">Jito IBRL</td>
+              <td className="py-2 pr-4">Per-validator block-build quality score (0–100): non-vote packing, slot time, vote packing</td>
+              <td className="py-2">Authoritative (Jito IBRL API)</td>
+            </tr>
+            <tr className="border-b border-ring">
+              <td className="py-2 pr-4 font-medium text-ink">DoubleZero</td>
+              <td className="py-2 pr-4">On-chain DZ User-account registrations (<code>is_dz</code> flag — shown but not scored)</td>
+              <td className="py-2">Authoritative (on-chain)</td>
+            </tr>
+            <tr>
+              <td className="py-2 pr-4 font-medium text-ink">Jupiter</td>
+              <td className="py-2 pr-4">LST mint → display name / symbol for newly discovered pools</td>
+              <td className="py-2">Authoritative for naming</td>
             </tr>
           </tbody>
         </table>
