@@ -311,6 +311,22 @@ export default async function HomePage() {
               </a>
             </div>
           </div>
+          <div className="mt-4 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-ink-muted">
+            <span>Data:</span>
+            <a href="https://www.helius.dev" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Helius RPC</a>
+            <span aria-hidden>·</span>
+            <a href="https://stakewiz.com" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Stakewiz</a>
+            <span aria-hidden>·</span>
+            <a href="https://www.validators.app" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Validators.app</a>
+            <span aria-hidden>·</span>
+            <a href="https://explorer.bam.dev" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Jito BAM</a>
+            <span aria-hidden>·</span>
+            <a href="https://ibrl.wtf" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Jito IBRL</a>
+            <span aria-hidden>·</span>
+            <a href="https://doublezero.xyz" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">DoubleZero</a>
+            <span aria-hidden>·</span>
+            <a href="https://jup.ag" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Jupiter</a>
+          </div>
         </footer>
       </div>
     </main>
