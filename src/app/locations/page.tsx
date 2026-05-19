@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { loadValidatorIndex, type ValidatorIndexEntry } from '@/lib/data';
+import { loadValidatorIndex } from '@/lib/data';
+import { aggregateTuples } from '@/lib/tuples';
 import { GdiLink } from '@/components/GdiLink';
-import { LocationsTable, type TupleRow } from '@/components/LocationsTable';
+import { LocationsTable } from '@/components/LocationsTable';
 
 export const revalidate = 60;
 
@@ -30,78 +31,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-/**
- * Aggregate per-validator entries from validator-index.json into one row per
- * unique (country, city, ASN) tuple. Composite rarity = geometric mean of the
- * three per-dim rarities (same formula GDI uses for pool scores). Only tuples
- * with at least one validator currently present are emitted — this is what
- * the data lets us know about; "empty" hypothetical tuples can't be surfaced.
- */
-function aggregateTuples(rows: readonly ValidatorIndexEntry[]): TupleRow[] {
-  // Two-pass: first build the buckets + per-validator sums, then compute means.
-  type Agg = TupleRow & {
-    _wizSum: number; _wizN: number;
-    _ibrlSum: number; _ibrlN: number;
-    _ibrlMax: number;
-  };
-  const tuples = new Map<string, Agg>();
-  for (const v of rows) {
-    if (!v.country || !v.city || !v.asn) continue;
-    const key = `${v.country}|${v.city}|${v.asn}`;
-    let t = tuples.get(key);
-    if (!t) {
-      t = {
-        key,
-        country: v.country,
-        city: v.city,
-        asnId: v.asn,
-        asnName: v.asn_name || v.asn,
-        rarityCountry: v.rarity_country,
-        rarityCity: v.rarity_city,
-        rarityAsn: v.rarity_asn,
-        composite: v.composite_rarity,
-        validatorCount: 0,
-        dzCount: 0,
-        totalStakeSol: 0,
-        avgWizScore: null,
-        avgIbrlScore: null,
-        maxIbrlScore: null,
-        _wizSum: 0,
-        _wizN: 0,
-        _ibrlSum: 0,
-        _ibrlN: 0,
-        _ibrlMax: 0,
-      };
-      tuples.set(key, t);
-    }
-    t.validatorCount += 1;
-    if (v.is_dz === true) t.dzCount += 1;
-    t.totalStakeSol += v.activated_stake_sol;
-    // Simple unweighted mean for both Performance + IBRL. Each validator at
-    // the location counts equally — audience is new operators evaluating
-    // typical infra quality, not "what the whale here experiences".
-    // Validators missing a score (e.g. no blocks produced this epoch for
-    // IBRL) are excluded from the mean rather than counted as zero.
-    if (typeof v.wiz_score === 'number' && Number.isFinite(v.wiz_score)) {
-      t._wizSum += v.wiz_score;
-      t._wizN += 1;
-    }
-    if (typeof v.ibrl_score === 'number' && Number.isFinite(v.ibrl_score)) {
-      t._ibrlSum += v.ibrl_score;
-      t._ibrlN += 1;
-      if (v.ibrl_score > t._ibrlMax) t._ibrlMax = v.ibrl_score;
-    }
-  }
-  // Finalise: compute means, strip internal sums before returning.
-  return [...tuples.values()].map(({ _wizSum, _wizN, _ibrlSum, _ibrlN, _ibrlMax, ...t }) => ({
-    ...t,
-    avgWizScore: _wizN > 0 ? _wizSum / _wizN : null,
-    avgIbrlScore: _ibrlN > 0 ? _ibrlSum / _ibrlN : null,
-    // Max only meaningful when >1 IBRL data point; otherwise max == avg, no
-    // extra signal. Null suppresses the "max N" subtext in the table cell.
-    maxIbrlScore: _ibrlN > 1 ? _ibrlMax : null,
-  }));
-}
+// Tuple aggregation lives in `@/lib/tuples` so the /validator detail page
+// can use the same formulas for its "where you could move to" feature.
 
 export default async function LocationsPage() {
   const idx = await loadValidatorIndex();

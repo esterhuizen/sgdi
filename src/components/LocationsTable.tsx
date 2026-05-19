@@ -7,33 +7,11 @@
 // location name; clicking a column header sorts by that dimension.
 
 import { useMemo, useState } from 'react';
-
-export type TupleRow = {
-  /** Stable key (country|city|asn). */
-  key: string;
-  country: string;
-  city: string;
-  asnId: string;
-  asnName: string;
-  rarityCountry: number | null;
-  rarityCity: number | null;
-  rarityAsn: number | null;
-  composite: number | null;
-  validatorCount: number;
-  dzCount: number;
-  totalStakeSol: number;
-  /** Simple (unweighted) mean of stakewiz wiz_score across all validators at
-   *  this tuple. null when no validator at the location has a wiz_score. */
-  avgWizScore: number | null;
-  /** Simple (unweighted) mean of IBRL score across validators that produced
-   *  ≥1 block this epoch. null when nobody at the tuple has a score. */
-  avgIbrlScore: number | null;
-  /** Highest IBRL score across the validators at this tuple. Proxy for
-   *  the location's *capability* (what a well-configured operator could
-   *  achieve there) — the avg can be dragged down by weak operators.
-   *  null when ≤1 IBRL data point (max == avg, no extra signal). */
-  maxIbrlScore: number | null;
-};
+// TupleRow lives in src/lib/tuples.ts (shared with /validator/<pubkey>).
+// Re-export so existing `import { TupleRow } from '@/components/LocationsTable'`
+// callers don't break.
+export type { TupleRow } from '@/lib/tuples';
+import type { TupleRow } from '@/lib/tuples';
 
 type SortField = 'composite' | 'country' | 'city' | 'asn' | 'performance' | 'ibrl' | 'validators' | 'dz' | 'stake';
 type SortDir = 'asc' | 'desc';
