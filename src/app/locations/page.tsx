@@ -15,12 +15,12 @@ export async function generateMetadata(): Promise<Metadata> {
   const epoch = idx?.epoch ?? 0;
   const ogImageUrl = `/locations/opengraph-image?epoch=${epoch}`;
   return {
-    title: 'Where to host for maximum stake',
+    title: 'Explore rare hosting locations',
     description:
       'Rare validator (country, city, ASN) tuples sorted by rarity, ' +
-      'filterable by DoubleZero support. For validator operators: find the ' +
-      'specific hosting location where your validator earns the most ' +
-      'decentralisation score.',
+      'filterable by DoubleZero support and minimum IBRL. For validator ' +
+      'operators: find the specific hosting location where your validator ' +
+      'earns the most decentralisation score.',
     openGraph: {
       images: [{ url: ogImageUrl, width: 1200, height: 630 }],
     },
@@ -51,7 +51,7 @@ export default async function LocationsPage() {
       <header className="mt-6 max-w-3xl">
         <span className="pill">For validator operators</span>
         <h1 className="mt-4 text-3xl font-semibold tracking-tight text-ink md:text-4xl">
-          Where to host for maximum stake
+          Explore rare hosting locations
         </h1>
         <p className="mt-4 text-base leading-relaxed text-ink-muted">
           Stake pools delegate to validators that improve their decentralisation

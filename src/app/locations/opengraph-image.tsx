@@ -13,7 +13,7 @@ export const contentType = 'image/png';
 // routes. CDN cache-control header below handles edge caching.
 export const dynamic = 'force-dynamic';
 export const alt =
-  'Where to host for maximum stake — rare validator locations on DoubleZero, ranked by composite rarity.';
+  'Explore rare hosting locations — rare validator locations on DoubleZero, ranked by composite rarity.';
 
 const C = {
   bg: '#0a0d12',
@@ -131,7 +131,7 @@ export default async function Image() {
               marginTop: 6,
             }}
           >
-            Where to host for maximum stake
+            Explore rare hosting locations
           </div>
           {idx ? (
             <div

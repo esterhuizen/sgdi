@@ -79,7 +79,7 @@ export default async function ValidatorDetailPage({ params }: Props) {
     return (
       <main className="container-narrow py-16">
         <Link href="/validator" className="drilldown text-sm text-ink-muted hover:text-ink">
-          ← Back to validator lookup
+          ← Back to validator search
         </Link>
         <h1 className="mt-8 font-display text-2xl font-semibold text-ink">
           Validator not in active set
@@ -173,7 +173,7 @@ export default async function ValidatorDetailPage({ params }: Props) {
   return (
     <main className="container-narrow py-12 md:py-16">
       <Link href="/validator" className="drilldown text-sm text-ink-muted hover:text-ink">
-        ← Back to validator lookup
+        ← Back to validator search
       </Link>
 
       <header className="mt-6 max-w-3xl">

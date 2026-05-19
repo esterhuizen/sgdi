@@ -6,9 +6,9 @@ import { ValidatorSearchBox } from '@/components/ValidatorSearchBox';
 export const revalidate = 60;
 
 export const metadata: Metadata = {
-  title: 'Validator lookup',
+  title: 'Optimise validator location',
   description:
-    'Look up any Solana validator\'s decentralisation profile — country, city, ASN, rarity per dimension, and rank against the active-voting set.',
+    'Look up any Solana validator and see rarer-but-equal-IBRL hosting locations. For operators wanting to lift their pool-delegation share by moving to a less concentrated country / city / ASN.',
 };
 
 const fmt = {
@@ -33,12 +33,15 @@ export default async function ValidatorLookupPage() {
       </Link>
 
       <header className="mt-8 max-w-2xl">
-        <h1 className="font-display text-3xl font-bold tracking-tight2 text-ink md:text-4xl">
-          Validator lookup
+        <span className="pill">For validator operators</span>
+        <h1 className="mt-4 font-display text-3xl font-bold tracking-tight2 text-ink md:text-4xl">
+          Optimise validator location
         </h1>
         <p className="mt-4 text-base leading-relaxed text-ink-muted">
-          See where your validator stands on country, city, and network-operator
-          concentration. Search by vote account, identity key, or validator name.
+          See where your validator stands today, then get a shortlist of
+          rarer locations where the typical operator already matches or
+          beats your block-build score. Search by vote account, identity
+          key, or validator name.
         </p>
       </header>
 

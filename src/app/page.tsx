@@ -126,18 +126,25 @@ export default async function HomePage() {
               >
                 Index methodology →
               </Link>
-              <Link
-                href="/validator"
-                className="drilldown text-ink-muted hover:text-ink"
-              >
-                Validator lookup →
-              </Link>
-              <Link
-                href="/locations"
-                className="drilldown text-ink-muted hover:text-ink"
-              >
-                Where to host →
-              </Link>
+              {/* Validator-operator-facing actions, kept together so the
+                 audience signal is obvious. Inline-flex with its own gap
+                 so the label and the two links wrap as one block on
+                 narrow screens. */}
+              <span className="inline-flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span className="text-ink-dim">For validators:</span>
+                <Link
+                  href="/validator"
+                  className="drilldown text-ink-muted hover:text-ink"
+                >
+                  Optimise validator location →
+                </Link>
+                <Link
+                  href="/locations"
+                  className="drilldown text-ink-muted hover:text-ink"
+                >
+                  Explore rare hosting locations →
+                </Link>
+              </span>
               <a
                 href="/gdi/leaderboard-latest.json"
                 target="_blank"
