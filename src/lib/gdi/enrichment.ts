@@ -42,14 +42,18 @@ export type EnrichmentInput = {
 };
 
 /**
- * Map (gossip version, is_jito, is_bam) to one of 5 client labels:
+ * Map (gossip version, is_jito, is_bam) to a client-family label.
  *
- *   Agave         vanilla Anza Agave (2.x / 3.x / 4.x) — no Jito, no BAM
- *   Jito          Agave-family with Jito tip-program activity
- *   BAM           Agave-family connected to Jito's Block Assembly Marketplace
- *   Frankendancer Jump's hybrid (Firedancer TPU + Agave runtime) — version 0.8xx
- *   Firedancer    Pure Firedancer — version 0.0xx-0.7xx (placeholder; near-zero
- *                 mainnet presence today, included for forward-compat)
+ *   Agave / Jito / BAM            Agave-family v2 / v3 (legacy bucket)
+ *   Agave v4 / Jito v4 / BAM v4   Agave-family v4 — split out as their
+ *                                 own CDI buckets because SF tracks
+ *                                 adoption of major Agave-family upgrades.
+ *                                 Generalised: any v≥4 gets "<family> v<N>"
+ *                                 so a future v5 surfaces automatically.
+ *   Frankendancer                 Jump's hybrid (Firedancer TPU + Agave
+ *                                 runtime) — version 0.8xx
+ *   Firedancer                    Pure Firedancer — version 0.0xx-0.7xx
+ *                                 (placeholder; near-zero mainnet presence)
  *
  * Priority for Agave-family: BAM > Jito > vanilla. BAM is more specific
  * because BAM-connected validators run a Jito-derived stack — is_bam=true
@@ -79,9 +83,11 @@ export function classifyClient(
   // Agave-family: 2.x, 3.x, 4.x... Require a leading digit followed by a dot.
   // Accepts pre-release suffixes like "4.0.0-rc.1".
   if (/^[1-9]\d*\./.test(version)) {
-    if (isBam) return 'BAM';
-    if (isJito) return 'Jito';
-    return 'Agave';
+    const major = parseInt(version.split('.')[0], 10);
+    const family = isBam ? 'BAM' : isJito ? 'Jito' : 'Agave';
+    // v4+ → suffix the major version so adoption shows up as its own
+    // bucket in the CDI. v2/v3 stay unlabelled for backward compat.
+    return major >= 4 ? `${family} v${major}` : family;
   }
 
   return null;

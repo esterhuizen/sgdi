@@ -217,7 +217,7 @@ export default function MethodologyPage() {
           <tbody className="text-ink-muted">
             <tr className="border-b border-ring">
               <td className="py-2 pr-4 font-medium text-ink">Helius RPC</td>
-              <td className="py-2 pr-4">Pool → validator → stake mapping (current epoch)</td>
+              <td className="py-2 pr-4">Pool → validator → stake mapping (current epoch); <code>getClusterNodes</code> for client version per identity (used to derive Agave / Jito / BAM / vN labels)</td>
               <td className="py-2">Authoritative (on-chain)</td>
             </tr>
             <tr className="border-b border-ring">
@@ -227,8 +227,8 @@ export default function MethodologyPage() {
             </tr>
             <tr className="border-b border-ring">
               <td className="py-2 pr-4 font-medium text-ink">Validators.app</td>
-              <td className="py-2 pr-4">Cross-reference for validator metadata; software_client labels (Agave, AgaveBam, Frankendancer, JitoLabs, Firedancer, …)</td>
-              <td className="py-2">Primary for client labels; fallback for location</td>
+              <td className="py-2 pr-4">Cross-reference for validator metadata (datacenter labels, identity names, geo fallback)</td>
+              <td className="py-2">Fallback / disagreement check</td>
             </tr>
             <tr className="border-b border-ring">
               <td className="py-2 pr-4 font-medium text-ink">Jito BAM</td>
@@ -343,8 +343,17 @@ export default function MethodologyPage() {
         </p>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
           For each pool we compute the stake-weighted distribution across
-          known validator clients (Agave, AgaveBam, JitoLabs, Frankendancer,
-          Firedancer, HarmonicAgave, Rakurai, …) and report the{' '}
+          validator client labels (
+          <code className="rounded bg-bg-muted px-1.5 py-0.5">Agave</code>,
+          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Jito</code>,
+          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">BAM</code>
+          {' '}(v2/v3),{' '}
+          <code className="rounded bg-bg-muted px-1.5 py-0.5">Agave v4</code>,
+          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Jito v4</code>,
+          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">BAM v4</code>,
+          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Frankendancer</code>,
+          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Firedancer</code>,
+          {' '}…) and report the{' '}
           <em>effective number of clients</em> — the exponential of the
           Shannon entropy of that distribution. A pool with all stake on
           one client scores <code className="rounded bg-bg-muted px-1.5 py-0.5">1.0</code>;
@@ -354,23 +363,29 @@ export default function MethodologyPage() {
           read as &quot;above&quot; or &quot;below&quot; average.
         </p>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
-          <strong className="text-ink">Trust model.</strong> Client labels
-          come from{' '}
-          <a
-            href="https://www.validators.app/api-documentation"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="drilldown hover:text-ink"
-          >
-            validators.app
-          </a>
-          &apos;s curated <code className="rounded bg-bg-muted px-1.5 py-0.5">software_client</code>{' '}
-          field. The <code>jito</code> flag is on-chain verifiable (validators
-          participating in Jito&apos;s tip-distribution program are detectable
-          from chain activity), but the finer distinctions between Frankendancer,
-          Firedancer, HarmonicAgave etc. rely partly on operator self-attestation
-          via the validators.app profile. We surface the labels as-is and
-          flag the trust model here for transparency.
+          <strong className="text-ink">Why v4 has its own bucket.</strong>{' '}
+          Agave-family v4 is the major upgrade the Solana Foundation tracks
+          for network rollout. Lumping v4 with v2/v3 would hide adoption
+          progress. We split the bucket so a pool delegating heavily to v4
+          shows up as <em>more diverse</em> in the CDI than a pool stuck on
+          older majors with the same nominal split. The rule generalises:
+          any v≥4 produces its own bucket
+          (e.g. <code className="rounded bg-bg-muted px-1.5 py-0.5">Agave v4</code>,
+          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Agave v5</code>,
+          …) so future majors surface automatically.
+        </p>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          <strong className="text-ink">Trust model.</strong> The version
+          string and identity pubkey come from Solana&apos;s on-chain{' '}
+          <code className="rounded bg-bg-muted px-1.5 py-0.5">getClusterNodes</code>{' '}
+          RPC — authoritative and covers 100% of gossip-visible validators.
+          The <code>jito</code> flag is on-chain verifiable (Jito tip-program
+          activity is detectable). The <code>bam</code> flag comes from{' '}
+          <a href="https://bam.dev/explorer/" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">Jito&apos;s BAM API</a>.
+          Frankendancer vs Firedancer is inferred from the gossip version
+          string (0.8xx = Frankendancer). No operator self-attestation is
+          relied on — every bucket above is mechanically derivable from
+          public sources.
         </p>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
           <strong className="text-ink">Not folded into GDI.</strong> CDI is
