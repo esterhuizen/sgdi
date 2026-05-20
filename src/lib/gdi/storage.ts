@@ -151,7 +151,7 @@ export type ValidatorRow = {
   // Client diversity. client_name + client_version now derived from
   // getClusterNodes (Solana RPC) instead of validators.app — covers 100% of
   // gossip-visible validators and is unaffected by VA's label collapse.
-  client_name: string | null;      // "Agave" / "Jito" / "BAM" (v2/v3) | "Agave v4" / "Jito v4" / "BAM v4" (or vN for N≥4) | "Frankendancer" (0.8xx) | "Firedancer" (0.0..0.7xx) | null
+  client_name: string | null;      // "Agave" / "Jito" / "BAM" (v2/v3) | "Agave v4" / "Jito v4" / "BAM v4" (vN for N≥4) | "Frankendancer" / "Firedancer" (build < 40000) | "Frankendancer v4" / "Firedancer v4" (build ≥ 40000, vN follows the build number) | null
   client_version: string | null;   // raw version string from gossip
   is_jito: number | null;          // 0 / 1; null = unknown
   is_dz: number | null;            // 0 / 1; null = unknown — DoubleZero network participation

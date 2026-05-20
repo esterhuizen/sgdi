@@ -352,7 +352,9 @@ export default function MethodologyPage() {
           {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Jito v4</code>,
           {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">BAM v4</code>,
           {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Frankendancer</code>,
+          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Frankendancer v4</code>,
           {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Firedancer</code>,
+          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Firedancer v4</code>,
           {' '}…) and report the{' '}
           <em>effective number of clients</em> — the exponential of the
           Shannon entropy of that distribution. A pool with all stake on
@@ -364,15 +366,34 @@ export default function MethodologyPage() {
         </p>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
           <strong className="text-ink">Why v4 has its own bucket.</strong>{' '}
-          Agave-family v4 is the major upgrade the Solana Foundation tracks
-          for network rollout. Lumping v4 with v2/v3 would hide adoption
-          progress. We split the bucket so a pool delegating heavily to v4
+          v4 is the major upgrade the Solana Foundation tracks for network
+          rollout (per Jump&apos;s compat note: &quot;operators are required
+          to be running a minimum of Agave 4.0.0-rc.1 or Firedancer
+          0.909.40001&quot;). Lumping v4 with v2/v3 would hide adoption
+          progress. We split each family so a pool delegating heavily to v4
           shows up as <em>more diverse</em> in the CDI than a pool stuck on
-          older majors with the same nominal split. The rule generalises:
-          any v≥4 produces its own bucket
-          (e.g. <code className="rounded bg-bg-muted px-1.5 py-0.5">Agave v4</code>,
-          {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">Agave v5</code>,
-          …) so future majors surface automatically.
+          older majors with the same nominal split.
+        </p>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          The rule generalises across families:
+        </p>
+        <ul className="mt-2 max-w-3xl list-disc pl-6 text-sm leading-relaxed text-ink-muted">
+          <li>
+            <strong className="text-ink">Agave-family</strong> (Agave / Jito
+            / BAM): major version ≥ 4 → <code className="rounded bg-bg-muted px-1.5 py-0.5">{'<family> v<N>'}</code>.
+          </li>
+          <li>
+            <strong className="text-ink">Frankendancer / Firedancer</strong>:
+            build number ≥ 40000 → <code className="rounded bg-bg-muted px-1.5 py-0.5">{'<family> v<N>'}</code>{' '}
+            where <code>N = floor(build / 10000)</code>. So
+            {' '}<code className="rounded bg-bg-muted px-1.5 py-0.5">0.909.40001</code>{' '}
+            and <code className="rounded bg-bg-muted px-1.5 py-0.5">0.909.0-rc.40001</code>{' '}
+            both classify as Frankendancer v4.
+          </li>
+        </ul>
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
+          Future v5 surfaces automatically without code changes (Agave 5.x.x
+          → Agave v5; Frankendancer build ≥ 50000 → Frankendancer v5).
         </p>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
           <strong className="text-ink">Trust model.</strong> The version

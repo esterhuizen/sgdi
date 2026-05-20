@@ -44,16 +44,25 @@ export type EnrichmentInput = {
 /**
  * Map (gossip version, is_jito, is_bam) to a client-family label.
  *
- *   Agave / Jito / BAM            Agave-family v2 / v3 (legacy bucket)
- *   Agave v4 / Jito v4 / BAM v4   Agave-family v4 — split out as their
- *                                 own CDI buckets because SF tracks
- *                                 adoption of major Agave-family upgrades.
- *                                 Generalised: any v≥4 gets "<family> v<N>"
- *                                 so a future v5 surfaces automatically.
- *   Frankendancer                 Jump's hybrid (Firedancer TPU + Agave
- *                                 runtime) — version 0.8xx
- *   Firedancer                    Pure Firedancer — version 0.0xx-0.7xx
- *                                 (placeholder; near-zero mainnet presence)
+ *   Agave / Jito / BAM                    Agave-family v2/v3 (legacy bucket)
+ *   Agave v4 / Jito v4 / BAM v4           Agave-family v4 — split out as
+ *                                         their own CDI buckets because SF
+ *                                         tracks adoption of major Agave-
+ *                                         family upgrades. Generalised:
+ *                                         any v≥4 gets "<family> v<N>".
+ *   Frankendancer                         Jump's hybrid (Firedancer TPU +
+ *                                         Agave runtime) — version 0.8xx /
+ *                                         0.9xx with build < 40000.
+ *   Frankendancer v4 / Firedancer v4      Build ≥ 40001 encodes the
+ *                                         v4-equivalent upgrade (per Jump's
+ *                                         compat note: "minimum Agave 4.0.0
+ *                                         or Firedancer 0.909.40001"). Same
+ *                                         build-number → major-version rule
+ *                                         for v5+ (build ≥ 50000).
+ *   Firedancer                            Pure Firedancer — version
+ *                                         0.0..0.7xx with build < 40000
+ *                                         (placeholder bucket; refine when
+ *                                         pure FD validators show up).
  *
  * Priority for Agave-family: BAM > Jito > vanilla. BAM is more specific
  * because BAM-connected validators run a Jito-derived stack — is_bam=true
@@ -72,12 +81,21 @@ export function classifyClient(
   if (!version) return null;
 
   if (version.startsWith('0.')) {
-    // Frankendancer ships as 0.8xx (mainnet, 2025-2026). Pure Firedancer's
-    // mainnet versioning is still TBD; we tentatively reserve 0.0..0.7xx
-    // for it. Refine when pure FD validators show up.
-    const minor = parseInt(version.split('.')[1] ?? '0', 10);
-    if (minor >= 800) return 'Frankendancer';
-    return 'Firedancer';
+    // Frankendancer ships 0.8xx / 0.9xx; pure Firedancer placeholder is
+    // 0.0..0.7xx. The v4 marker lives in the BUILD NUMBER, not the minor:
+    //   "0.909.40001"          — release build, build=40001 → v4
+    //   "0.909.0-rc.40001"     — pre-release, rc.40001 → v4
+    // Build ≥ 40000 → v4. Generalises: 50000 → v5, etc.
+    const parts = version.split('.');
+    const minor = parseInt(parts[1] ?? '0', 10);
+    const family = minor >= 800 ? 'Frankendancer' : 'Firedancer';
+    const rcMatch = /-rc\.(\d+)/.exec(version);
+    const build = rcMatch ? parseInt(rcMatch[1], 10) : parseInt(parts[2] ?? '0', 10);
+    if (Number.isFinite(build) && build >= 40000) {
+      const major = Math.floor(build / 10000);
+      return `${family} v${major}`;
+    }
+    return family;
   }
 
   // Agave-family: 2.x, 3.x, 4.x... Require a leading digit followed by a dot.
