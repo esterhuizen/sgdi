@@ -145,6 +145,12 @@ export default async function HomePage() {
                   Explore rare hosting locations →
                 </Link>
               </span>
+              <Link
+                href="/clients"
+                className="drilldown text-ink-muted hover:text-ink"
+              >
+                v4 rollout →
+              </Link>
               <a
                 href="/gdi/leaderboard-latest.json"
                 target="_blank"
