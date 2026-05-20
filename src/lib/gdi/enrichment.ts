@@ -51,18 +51,26 @@ export type EnrichmentInput = {
  *                                         family upgrades. Generalised:
  *                                         any v≥4 gets "<family> v<N>".
  *   Frankendancer                         Jump's hybrid (Firedancer TPU +
- *                                         Agave runtime) — version 0.8xx /
- *                                         0.9xx with build < 40000.
- *   Frankendancer v4 / Firedancer v4      Build ≥ 40001 encodes the
- *                                         v4-equivalent upgrade (per Jump's
- *                                         compat note: "minimum Agave 4.0.0
- *                                         or Firedancer 0.909.40001"). Same
- *                                         build-number → major-version rule
- *                                         for v5+ (build ≥ 50000).
- *   Firedancer                            Pure Firedancer — version
- *                                         0.0..0.7xx with build < 40000
- *                                         (placeholder bucket; refine when
- *                                         pure FD validators show up).
+ *                                         Agave runtime) — gossip minor
+ *                                         ≥ 800 (mainnet 0.8xx, 0.9xx).
+ *                                         Build < 40000.
+ *   Frankendancer v4                      0.8xx/0.9xx with build ≥ 40000
+ *                                         (e.g. 0.909.40001) — the v4-
+ *                                         equivalent upgrade per Jump's
+ *                                         compat note. Same build-number
+ *                                         → major-version rule for v5+
+ *                                         (build ≥ 50000).
+ *   Firedancer                            Pure Firedancer + currently
+ *                                         unclassified FD-family builds
+ *                                         (gossip minor < 800). Mainnet
+ *                                         today is mostly experimental
+ *                                         0.1.x; refine as / if pure FD
+ *                                         ships a stable release scheme.
+ *                                         Build < 40000.
+ *   Firedancer v4                         Pure FD build ≥ 40000. No
+ *                                         mainnet validators yet — pure
+ *                                         Firedancer hasn't shipped its
+ *                                         v4-equivalent.
  *
  * Priority for Agave-family: BAM > Jito > vanilla. BAM is more specific
  * because BAM-connected validators run a Jito-derived stack — is_bam=true
@@ -70,8 +78,7 @@ export type EnrichmentInput = {
  *
  * For 0.x clients we don't override based on is_jito/is_bam: the version
  * uniquely identifies the underlying software family regardless of operator
- * add-ons. (A "JitoFrankendancer" would still be Frankendancer at the
- * software-family level — Jito's mods sit alongside, not as a fork.)
+ * add-ons.
  */
 export function classifyClient(
   version: string | null | undefined,
@@ -81,8 +88,12 @@ export function classifyClient(
   if (!version) return null;
 
   if (version.startsWith('0.')) {
-    // Frankendancer ships 0.8xx / 0.9xx; pure Firedancer placeholder is
-    // 0.0..0.7xx. The v4 marker lives in the BUILD NUMBER, not the minor:
+    // 0.8xx/0.9xx is Frankendancer per Jump's public release notes;
+    // anything below 0.800 is unclassified-FD-family (experimental,
+    // Harmonic-adjacent, etc.) — bucketed as "Firedancer" for now until
+    // pure FD has a published mainnet versioning scheme.
+    //
+    // v4 marker lives in the BUILD NUMBER, not the minor:
     //   "0.909.40001"          — release build, build=40001 → v4
     //   "0.909.0-rc.40001"     — pre-release, rc.40001 → v4
     // Build ≥ 40000 → v4. Generalises: 50000 → v5, etc.
