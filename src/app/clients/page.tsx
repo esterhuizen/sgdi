@@ -85,15 +85,7 @@ export default async function ClientsPage() {
           Solana validator client adoption
         </h1>
         <p className="mt-5 text-base leading-relaxed text-ink-muted md:text-lg">
-          Live, on-chain view of the network&apos;s v4 rollout. Per Jump&apos;s
-          compat note, every validator should be running a minimum of{' '}
-          <strong className="text-ink">Agave 4.0.0-rc.1</strong> or{' '}
-          <strong className="text-ink">Firedancer 0.909.40001</strong>.
-          Client labels derived from on-chain <code className="rounded bg-bg-muted px-1 py-0.5 text-sm">getClusterNodes</code>{' '}
-          + Jito&apos;s BAM API — no operator self-attestation.{' '}
-          <Link href="/methodology#client-diversity" className="drilldown hover:text-ink">
-            Methodology →
-          </Link>
+          Live, on-chain view of the network&apos;s v4 rollout.
         </p>
       </header>
 
