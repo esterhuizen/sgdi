@@ -338,7 +338,7 @@ export default function MethodologyPage() {
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
           Stake concentrated on a single validator client is a real network
           risk — a bug in that client can take down every validator running
-          it. The Client Decentralisation Index (CDI) sits alongside GDI as
+          it. The Client Diversity Index (CDI) sits alongside GDI as
           a companion score on a different axis.
         </p>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">

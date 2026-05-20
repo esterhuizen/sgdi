@@ -38,7 +38,7 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
             <th className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell">
               <GdiLink
                 href="/methodology#client-diversity"
-                title="CDI — Client Decentralisation Index. Click for methodology."
+                title="CDI — Client Diversity Index. Click for methodology."
               >
                 CDI
               </GdiLink>
