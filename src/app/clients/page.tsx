@@ -5,13 +5,27 @@ import { DEFAULT_TVL_FLOOR_SOL } from '@/lib/leaderboard-config';
 
 export const revalidate = 60;
 
-export const metadata: Metadata = {
-  title: 'Solana validator client adoption',
-  description:
-    'Live network-wide rollout tracker for Agave-family v4 and Firedancer ' +
-    '0.909.40001+. Shows stake share on v4 vs pre-v4 buckets across the ' +
-    'whole network and per stake pool.',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const data = await loadLeaderboard();
+  // Cache-bust the og:image URL per epoch so X re-fetches the preview
+  // when adoption numbers change. Same pattern as the landing page.
+  const epoch = data?.epoch ?? 0;
+  const ogImageUrl = `/clients/opengraph-image?epoch=${epoch}`;
+  return {
+    title: 'Solana validator client adoption',
+    description:
+      'Live network-wide rollout tracker for Agave-family v4 and Firedancer ' +
+      '0.909.40001+. Shows stake share on v4 vs pre-v4 buckets across the ' +
+      'whole network and per stake pool.',
+    openGraph: {
+      images: [{ url: ogImageUrl, width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      images: [ogImageUrl],
+    },
+  };
+}
 
 // A client label "Agave v4" / "Frankendancer v5" / etc. → its major version
 // number (4, 5, …). Returns null for unlabelled buckets like "Agave",
