@@ -231,18 +231,12 @@ export default async function ValidatorDetailPage({ params }: Props) {
       </section>
 
       {/* Performance + client */}
-      <section className="mt-4 grid gap-4 md:grid-cols-3">
+      <section className="mt-4 grid gap-4 md:grid-cols-2">
         <div className="surface p-5"
           title="Jito's IBRL — Increase Bandwidth, Reduce Latency. Stake-build quality this epoch: non-vote packing (45%), slot time (40%), vote packing (15%).">
           <div className="text-xs uppercase tracking-wider text-ink-dim">IBRL block-build</div>
           <div className="num mt-2 text-3xl font-semibold text-ink">{fmt.num(v.ibrl_score, 1)}</div>
           <div className="mt-1 text-xs text-ink-dim">Jito 0–100, this epoch</div>
-        </div>
-        <div className="surface p-5"
-          title="Stakewiz wiz_score — composite of vote success, skip rate, uptime, commission, info completeness, concentration penalties.">
-          <div className="text-xs uppercase tracking-wider text-ink-dim">Operator score</div>
-          <div className="num mt-2 text-3xl font-semibold text-ink">{fmt.num(v.wiz_score, 1)}</div>
-          <div className="mt-1 text-xs text-ink-dim">Stakewiz 0–100</div>
         </div>
         <div className="surface p-5">
           <div className="text-xs uppercase tracking-wider text-ink-dim">Client</div>

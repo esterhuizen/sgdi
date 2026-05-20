@@ -137,12 +137,7 @@ export default async function PoolDetailPage({ params }: Props) {
       </section>
 
       {/* Secondary stats */}
-      <section className="mt-4 grid gap-4 md:grid-cols-3">
-        <div className="surface p-5">
-          <div className="text-xs uppercase tracking-wider text-ink-dim">Network impact (NIS)</div>
-          <div className="num mt-2 text-2xl text-ink">{fmt.num(latest.score.nis, 1)}</div>
-          <div className="text-xs text-ink-dim">stake-weighted Stakewiz wiz_score</div>
-        </div>
+      <section className="mt-4 grid gap-4 md:grid-cols-2">
         <div className="surface p-5">
           <div className="text-xs uppercase tracking-wider text-ink-dim">Validators / Stake</div>
           <div className="num mt-2 text-2xl text-ink">
@@ -202,7 +197,6 @@ export default async function PoolDetailPage({ params }: Props) {
                 <th className="py-3 pr-3 font-semibold">Country</th>
                 <th className="py-3 pr-3 font-semibold">City</th>
                 <th className="py-3 pr-3 font-semibold">ASN</th>
-                <th className="py-3 pr-3 text-right font-semibold">wiz_score</th>
                 <th className="py-3 pr-5 text-right font-semibold">Stake</th>
               </tr>
             </thead>
@@ -230,7 +224,6 @@ export default async function PoolDetailPage({ params }: Props) {
                       <span className="text-ink-dim">—</span>
                     )}
                   </td>
-                  <td className="num py-3 pr-3 text-right text-ink-muted">{fmt.num(v.wiz_score, 1)}</td>
                   <td className="num py-3 pr-5 text-right text-ink-muted">{fmt.sol(v.stake_sol)} SOL</td>
                 </tr>
               ))}

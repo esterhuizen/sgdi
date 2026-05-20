@@ -90,21 +90,16 @@ export default function MethodologyPage() {
           single-ASN failure mode.
         </p>
 
+
         <p className="mt-6 max-w-3xl text-sm leading-relaxed text-ink-muted">
-          A secondary signal, the <strong className="text-ink">Network Impact Score</strong> —
-          shown on each pool&apos;s detail page but not used in the GDI itself:
-        </p>
-        <pre className="mt-3 overflow-x-auto rounded-lg bg-bg-muted p-4 text-sm leading-relaxed">
-{`NIS  =  Σᵥ wᵥ · stakewiz_wiz_score(v)`}
-        </pre>
-        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-muted">
-          Captures whether a pool delegates to validators that score well on
-          Stakewiz&apos;s broader health metric (uptime, vote credits, skip rate,
-          commission). A pool can be geographically well-distributed but still
-          delegate to under-performing validators; NIS surfaces that. It&apos;s
-          intentionally NOT mixed into the GDI — separate concerns deserve
-          separate signals, and the leaderboard&apos;s job is decentralisation,
-          not operational quality.
+          The GDI deliberately excludes operator-quality composites
+          (Stakewiz wiz_score, similar). Those metrics weight things like
+          commission, which validators operating in remote regions often
+          set higher to cover real cost differences — exactly the
+          geographic decentralisation the index is designed to reward.
+          Mixing quality and decentralisation into one number creates
+          counter-incentives. Quality signals belong on their source
+          (Stakewiz, Solana Compass); GDI&apos;s job is geographic spread.
         </p>
       </section>
 
@@ -227,7 +222,7 @@ export default function MethodologyPage() {
             </tr>
             <tr className="border-b border-ring">
               <td className="py-2 pr-4 font-medium text-ink">Stakewiz</td>
-              <td className="py-2 pr-4">IP-derived country / city / ASN; activated stake; wiz_score</td>
+              <td className="py-2 pr-4">IP-derived country / city / ASN; activated stake</td>
               <td className="py-2">Primary for location + network shares</td>
             </tr>
             <tr className="border-b border-ring">

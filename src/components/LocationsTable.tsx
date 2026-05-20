@@ -13,7 +13,7 @@ import { useMemo, useState } from 'react';
 export type { TupleRow } from '@/lib/tuples';
 import type { TupleRow } from '@/lib/tuples';
 
-type SortField = 'composite' | 'country' | 'city' | 'asn' | 'performance' | 'ibrl' | 'validators' | 'dz' | 'stake';
+type SortField = 'composite' | 'country' | 'city' | 'asn' | 'ibrl' | 'validators' | 'dz' | 'stake';
 type SortDir = 'asc' | 'desc';
 
 const fmt = {
@@ -34,7 +34,6 @@ function sortValue(r: TupleRow, field: SortField): number {
     case 'country':     return r.rarityCountry ?? -Infinity;  // sort by per-dim rarity, not alpha
     case 'city':        return r.rarityCity ?? -Infinity;
     case 'asn':         return r.rarityAsn ?? -Infinity;
-    case 'performance': return r.avgWizScore ?? -Infinity;
     case 'ibrl':        return r.avgIbrlScore ?? -Infinity;
     case 'validators':  return r.validatorCount;
     case 'dz':          return r.dzCount;
@@ -192,10 +191,6 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                 title="IBRL — avg Jito block-build quality score (0–100). Captures network/DC quality: non-vote packing, slot time, vote packing.">
                 IBRL
               </SortHeader>
-              <SortHeader field="performance" active={sortField === 'performance'} dir={sortDir} onSort={toggleSort} align="right"
-                title="Operator score — avg Stakewiz wiz_score across validators at this location (0–100). Captures operator competence: vote success, skip rate, uptime, commission.">
-                Operator score
-              </SortHeader>
               <SortHeader field="validators" active={sortField === 'validators'} dir={sortDir} onSort={toggleSort} align="right">
                 Validators
               </SortHeader>
@@ -210,7 +205,7 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
           <tbody className="text-ink">
             {visible.length === 0 && (
               <tr>
-                <td colSpan={9} className="py-12 text-center text-ink-dim">
+                <td colSpan={8} className="py-12 text-center text-ink-dim">
                   No locations match the current filter.
                 </td>
               </tr>
@@ -243,9 +238,6 @@ export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
                   {r.maxIbrlScore != null && (
                     <div className="text-xs text-ink-dim tabular-nums">max {fmt.num(r.maxIbrlScore, 1)}</div>
                   )}
-                </td>
-                <td className="num py-3 pr-3 text-right text-ink tabular-nums">
-                  {fmt.num(r.avgWizScore, 1)}
                 </td>
                 <td className="num py-3 pr-3 text-right text-ink-muted tabular-nums">
                   {r.validatorCount}
