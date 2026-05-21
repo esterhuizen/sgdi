@@ -111,7 +111,7 @@ export default async function ClientsPage() {
             {fmt.pct(v4Share, 1)}
           </div>
           <div className="mt-1 text-sm text-ink-muted">
-            {fmt.sol(v4StakeSol)} SOL of {fmt.sol(networkTotalStake)} SOL · Agave 4 / Jito v4 / BAM v4 / Frankendancer 0.909.40001+
+            {fmt.sol(v4StakeSol)} SOL of {fmt.sol(networkTotalStake)} SOL
           </div>
         </div>
         <div className="surface p-6">

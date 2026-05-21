@@ -175,7 +175,7 @@ export default async function Image() {
               color: C.inkMuted,
             }}
           >
-            {fmt.sol(v4Stake)} SOL on {v4Validators} validators · Agave 4 / Jito v4 / BAM v4 / Frankendancer 0.909.40001+
+            {fmt.sol(v4Stake)} SOL on {v4Validators} validators
           </div>
         </div>
 
