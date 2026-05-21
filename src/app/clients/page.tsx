@@ -106,16 +106,16 @@ export default async function ClientsPage() {
       {/* Headline: network-wide v4 stake share */}
       <section className="mt-10 grid gap-4 md:grid-cols-3">
         <div className="surface p-6">
-          <div className="text-xs uppercase tracking-wider text-ink-dim">Network stake on v4</div>
+          <div className="text-xs uppercase tracking-wider text-ink-dim">Network stake on v4-compatible clients</div>
           <div className="num mt-2 font-display text-4xl font-semibold text-ink md:text-5xl">
             {fmt.pct(v4Share, 1)}
           </div>
           <div className="mt-1 text-sm text-ink-muted">
-            {fmt.sol(v4StakeSol)} SOL of {fmt.sol(networkTotalStake)} SOL
+            {fmt.sol(v4StakeSol)} SOL of {fmt.sol(networkTotalStake)} SOL · Agave 4 / Jito v4 / BAM v4 / Frankendancer 0.909.40001+
           </div>
         </div>
         <div className="surface p-6">
-          <div className="text-xs uppercase tracking-wider text-ink-dim">Validators on v4</div>
+          <div className="text-xs uppercase tracking-wider text-ink-dim">Validators on v4-compatible clients</div>
           <div className="num mt-2 font-display text-4xl font-semibold text-ink md:text-5xl">
             {v4Validators}
           </div>
@@ -178,10 +178,10 @@ export default async function ClientsPage() {
       {/* Per-pool v4 ranking */}
       <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
-          Stake pools — v4 adoption
+          Stake pools — v4-compatible adoption
         </h2>
         <p className="mt-2 max-w-2xl text-sm text-ink-muted">
-          Pools above the {fmt.sol(DEFAULT_TVL_FLOOR_SOL)} SOL headline floor, sorted by v4 stake share.
+          Pools above the {fmt.sol(DEFAULT_TVL_FLOOR_SOL)} SOL headline floor, sorted by share of their stake on v4-compatible clients.
           A pool delegating heavily to v4 is materially helping the rollout.
         </p>
         <div className="surface mt-4 overflow-x-auto">
