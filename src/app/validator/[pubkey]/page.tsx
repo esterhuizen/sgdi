@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { loadValidatorIndex, loadLeaderboard, loadPoolLatest } from '@/lib/data';
 import { aggregateTuples, type TupleRow } from '@/lib/tuples';
 import { GdiLink } from '@/components/GdiLink';
+import { RarerLocationsTable } from '@/components/RarerLocationsTable';
 
 export const revalidate = 60;
 
@@ -168,7 +169,6 @@ export default async function ValidatorDetailPage({ params }: Props) {
         .map((t) => ({ ...t, gainVsMine: (t.composite ?? 0) - (myComposite ?? 0) }))
         .sort((a, b) => b.gainVsMine - a.gainVsMine)
     : [];
-  const showAltsTop = 15;
 
   return (
     <main className="container-narrow py-12 md:py-16">
@@ -371,69 +371,7 @@ export default async function ValidatorDetailPage({ params }: Props) {
             or every rarer tuple is empty / off-DZ.
           </p>
         ) : (
-          <div className="surface mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-bg-muted/40 text-left text-xs uppercase tracking-[0.12em] text-ink-dim">
-                <tr>
-                  <th className="py-2.5 pl-4 pr-3 font-semibold">Rarity</th>
-                  <th className="py-2.5 pr-3 font-semibold">Country</th>
-                  <th className="py-2.5 pr-3 font-semibold">City</th>
-                  <th className="py-2.5 pr-3 font-semibold">ASN</th>
-                  <th className="py-2.5 pr-3 text-right font-semibold">IBRL (avg)</th>
-                  <th className="py-2.5 pr-3 text-right font-semibold">Validators</th>
-                  <th className="py-2.5 pr-4 text-right font-semibold">On DZ</th>
-                </tr>
-              </thead>
-              <tbody className="text-ink">
-                {alternatives.slice(0, showAltsTop).map((t) => (
-                  <tr key={t.key} className="border-t border-ring">
-                    <td className="num py-3 pl-4 pr-3 font-display text-base font-semibold tabular-nums text-ink">
-                      {fmt.num(t.composite, 2)}
-                      <div className="text-xs font-normal text-ink-dim tabular-nums">
-                        +{fmt.num(t.gainVsMine, 2)} vs yours
-                      </div>
-                    </td>
-                    <td className="py-3 pr-3">
-                      <div className="font-medium text-ink">{t.country}</div>
-                      <div className="text-xs text-ink-dim tabular-nums">{fmt.num(t.rarityCountry, 2)}</div>
-                    </td>
-                    <td className="py-3 pr-3">
-                      <div className="font-medium text-ink">{t.city}</div>
-                      <div className="text-xs text-ink-dim tabular-nums">{fmt.num(t.rarityCity, 2)}</div>
-                    </td>
-                    <td className="py-3 pr-3">
-                      <div className="font-medium text-ink">{t.asnName}</div>
-                      <div className="text-xs text-ink-dim">
-                        <span className="font-mono">{t.asnId}</span>{' '}
-                        · <span className="tabular-nums">{fmt.num(t.rarityAsn, 2)}</span>
-                      </div>
-                    </td>
-                    <td className="num py-3 pr-3 text-right text-ink tabular-nums">
-                      {fmt.num(t.avgIbrlScore, 1)}
-                      {myIbrl != null && t.avgIbrlScore != null && (
-                        <div className="text-xs text-ink-dim tabular-nums">
-                          +{fmt.num(t.avgIbrlScore - myIbrl, 1)} vs yours
-                        </div>
-                      )}
-                    </td>
-                    <td className="num py-3 pr-3 text-right text-ink-muted tabular-nums">
-                      {t.validatorCount}
-                    </td>
-                    <td className="num py-3 pr-4 text-right tabular-nums">
-                      <span className={t.dzCount > 0 ? 'text-success' : 'text-ink-dim'}>
-                        {t.dzCount}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {alternatives.length > showAltsTop && (
-              <div className="border-t border-ring px-4 py-2 text-xs text-ink-dim">
-                Showing top {showAltsTop} of {alternatives.length} rarer locations meeting your IBRL bar.
-              </div>
-            )}
-          </div>
+          <RarerLocationsTable alternatives={alternatives} myIbrl={myIbrl} />
         )}
       </section>
 
