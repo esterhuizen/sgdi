@@ -91,7 +91,7 @@ export default async function ValidatorLookupPage() {
       {idx && idx.validators.length > 0 && (
         <section className="mt-12 max-w-3xl">
           <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-dim">
-            Top 5 rarest active validators
+            Top 20 rarest active validators
           </h2>
           <p className="mt-2 text-xs text-ink-dim">
             These contribute the most to network decentralisation by virtue of where they run.
@@ -107,7 +107,7 @@ export default async function ValidatorLookupPage() {
                 </tr>
               </thead>
               <tbody>
-                {idx.validators.slice(0, 5).map((v) => (
+                {idx.validators.slice(0, 20).map((v) => (
                   <tr key={v.vote_pubkey} className="border-t border-ring">
                     <td className="num py-2.5 pl-4 pr-3 text-ink-muted">#{v.rank}</td>
                     <td className="py-2.5 pr-3">
