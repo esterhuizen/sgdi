@@ -15,6 +15,8 @@ type Props = {
 
 const fmt = {
   num: (v: number | null, digits = 2) => (v == null ? '—' : v.toFixed(digits)),
+  pct: (v: number | null | undefined, digits = 0) =>
+    v == null ? '—' : `${(v * 100).toFixed(digits)}%`,
   sol: (v: number | null) => {
     if (v == null) return '—';
     if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
@@ -43,6 +45,12 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
                 CDI
               </GdiLink>
             </th>
+            <th
+              className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell"
+              title="Share of pool stake on DoubleZero (DZ) validators"
+            >
+              DZ %
+            </th>
             <th className="py-3 pr-3 text-right font-semibold"><GdiLink /></th>
             <th className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell">country</th>
             <th className="hidden py-3 pr-3 text-right font-normal text-ink-dim sm:table-cell">city</th>
@@ -54,7 +62,7 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
         <tbody className="text-ink">
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={9} className="py-12 text-center text-ink-dim">
+              <td colSpan={10} className="py-12 text-center text-ink-dim">
                 No pools scored for epoch {epoch} yet. Check back after the next ingest.
               </td>
             </tr>
@@ -78,6 +86,9 @@ export function Leaderboard({ pools, baseline, epoch }: Props) {
               </td>
               <td className="num hidden py-4 pr-3 text-right text-xs tabular-nums text-ink-dim sm:table-cell">
                 {fmt.num(p.client_distribution?.effective_clients ?? null, 2)}
+              </td>
+              <td className="num hidden py-4 pr-3 text-right text-xs tabular-nums text-ink-dim sm:table-cell">
+                {fmt.pct(p.client_distribution?.operational?.dz_share, 0)}
               </td>
               <td className="num py-4 pr-3 text-right font-display text-xl font-bold tabular-nums">
                 {fmt.num(p.gdi, 2)}

@@ -113,57 +113,67 @@ export default async function HomePage() {
           License / data sources / epoch number all moved to other surfaces
           (footer, methodology page, stat strip respectively). */}
       <div className="border-b border-ring bg-bg-muted/60">
-        <div className="container-narrow flex flex-wrap items-center justify-between gap-3 py-2.5 text-xs">
+        <div className="container-narrow flex flex-col gap-2 py-2.5 text-xs">
           {data ? (
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-ink-dim">
-              <span className="inline-flex items-center gap-1.5">
-                <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
-                <span>Updated <span className="text-ink-muted">{freshnessAgo(data.last_published_at)}</span></span>
-              </span>
-              <Link
-                href="/methodology"
-                className="drilldown text-ink-muted hover:text-ink"
-              >
-                Index methodology →
-              </Link>
-              {/* Validator-operator-facing actions, kept together so the
-                 audience signal is obvious. Inline-flex with its own gap
-                 so the label and the two links wrap as one block on
-                 narrow screens. */}
-              <span className="inline-flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span className="text-ink-dim">For validators:</span>
+            <>
+              {/* Line 1: freshness signal + theme toggle. */}
+              <div className="flex items-center justify-between gap-3">
+                <span className="inline-flex items-center gap-1.5 text-ink-dim">
+                  <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
+                  <span>Updated <span className="text-ink-muted">{freshnessAgo(data.last_published_at)}</span></span>
+                </span>
+                <ThemeToggle />
+              </div>
+
+              {/* Line 2: surface links the reader is most likely to act on. */}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-ink-dim">
                 <Link
-                  href="/validator"
+                  href="/impact"
                   className="drilldown text-ink-muted hover:text-ink"
                 >
-                  Optimise validator location →
+                  GDI trending pools →
                 </Link>
-                <Link
-                  href="/locations"
+                <span className="inline-flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <span className="text-ink-dim">For validators:</span>
+                  <Link
+                    href="/validator"
+                    className="drilldown text-ink-muted hover:text-ink"
+                  >
+                    Optimise validator location →
+                  </Link>
+                  <Link
+                    href="/locations"
+                    className="drilldown text-ink-muted hover:text-ink"
+                  >
+                    Explore rare hosting locations →
+                  </Link>
+                </span>
+              </div>
+
+              {/* Line 3: reference links (raw JSON + methodology). */}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-ink-dim">
+                <a
+                  href="/gdi/leaderboard-latest.json"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="drilldown text-ink-muted hover:text-ink"
                 >
-                  Explore rare hosting locations →
+                  Raw data · JSON →
+                </a>
+                <Link
+                  href="/methodology"
+                  className="drilldown text-ink-muted hover:text-ink"
+                >
+                  Index methodology →
                 </Link>
-              </span>
-              <Link
-                href="/clients"
-                className="drilldown text-ink-muted hover:text-ink"
-              >
-                v4 rollout →
-              </Link>
-              <a
-                href="/gdi/leaderboard-latest.json"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="drilldown text-ink-muted hover:text-ink"
-              >
-                Raw data · JSON →
-              </a>
-            </div>
+              </div>
+            </>
           ) : (
-            <div className="text-ink-dim">First leaderboard arriving at next epoch boundary.</div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-ink-dim">First leaderboard arriving at next epoch boundary.</div>
+              <ThemeToggle />
+            </div>
           )}
-          <ThemeToggle />
         </div>
       </div>
 
