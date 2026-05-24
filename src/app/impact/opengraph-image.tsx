@@ -34,7 +34,6 @@ const fmt = {
 
 export default async function Image() {
   const latest = await loadLeaderboard();
-  const firstBoard = await loadLeaderboardForEpoch(FIRST_EPOCH);
   const lastEpoch = latest?.epoch ?? FIRST_EPOCH;
 
   // Current top-15 (≥100k SOL TVL, matches the page).
@@ -43,15 +42,25 @@ export default async function Image() {
     .sort((a, b) => (b.gdi ?? 0) - (a.gdi ?? 0))
     .slice(0, 15);
 
-  // Compute Δ for each pool: latest GDI vs first observation (FIRST_EPOCH if
-  // present, else the pool's current value — yields delta 0 and gets bucketed
-  // flat, which is the right behaviour for pools too new to score the delta).
+  // Load every epoch's board so we can find each pool's *earliest* observation —
+  // matches the dashboard exactly. Without this, pools that joined after
+  // FIRST_EPOCH would fall back to their current GDI (delta 0) and the mover
+  // count would diverge from the dashboard.
+  const epochs: number[] = [];
+  for (let e = FIRST_EPOCH; e <= lastEpoch; e++) epochs.push(e);
+  const boards: Record<number, Awaited<ReturnType<typeof loadLeaderboardForEpoch>>> = {};
+  for (const e of epochs) boards[e] = await loadLeaderboardForEpoch(e);
+
   type Row = { name: string; delta: number };
   const rows: Row[] = top15.map((p) => {
-    const firstMatch = firstBoard?.pools?.find((x) => x.pool_address === p.pool_address);
-    const firstGdi = firstMatch?.gdi ?? p.gdi!;
+    // Walk forward from FIRST_EPOCH; first non-null GDI sighting is the baseline.
+    let firstGdi: number | null = null;
+    for (const e of epochs) {
+      const match = boards[e]?.pools?.find((x) => x.pool_address === p.pool_address);
+      if (match?.gdi != null) { firstGdi = match.gdi; break; }
+    }
     const gdiNow = p.gdi!;
-    const delta = firstGdi > 0 ? (gdiNow - firstGdi) / firstGdi : 0;
+    const delta = firstGdi != null && firstGdi > 0 ? (gdiNow - firstGdi) / firstGdi : 0;
     return { name: p.pool_name ?? p.pool_address.slice(0, 8) + '…', delta };
   });
   rows.sort((a, b) => b.delta - a.delta);
