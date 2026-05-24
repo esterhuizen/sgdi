@@ -1,10 +1,5 @@
-// /impact — published evidence of GDI's effect on stake-pool operator
-// behaviour since launch.
-//
-// Audience: Solana Foundation head of staking (and anyone they share the
-// link with internally). Tone: methodology paper, not marketing. Every
-// claim should be auditable from the underlying JSON; every counter-
-// argument is named and answered in-line.
+// /impact — per-pool GDI trajectories since publication.
+// Reports the numbers; lets the reader draw the conclusions.
 
 import Link from 'next/link';
 import type { Metadata } from 'next';
@@ -15,35 +10,24 @@ export const revalidate = 60;
 export const metadata: Metadata = {
   title: 'GDI impact — measured operator response',
   description:
-    'Live evidence of how Solana stake pools have responded to the Geographic Decentralisation Index since launch. Per-pool GDI trajectories, engagement-event timeline, and the counterfactuals to consider.',
+    'Per-pool GDI trajectories across all Solana stake pools since the Geographic Decentralisation Index started publishing. Live data, recomputed each ingest.',
 };
 
 const FIRST_EPOCH = 969;
 
-// Engagement timeline — anchor events that should appear on the trajectory
-// chart as vertical annotations. Sourced from auto-poster JSONL + operator
-// communications.
-const EVENTS: { epoch: number; label: string; detail: string }[] = [
-  { epoch: 970, label: 'Leaderboard reveal',     detail: 'First public top-10 thread posted from @tielmane (2026-05-14). Pool teams started reposting their ranks.' },
-  { epoch: 973, label: 'Rank-change auto-posts', detail: 'Auto-poster began publishing per-epoch movement alerts. Pools moving UP get a public congrats post tagging their handle.' },
-  { epoch: 974, label: 'Discord launch',         detail: 'GDI shared in Solana Tech Discord (2026-05-19). Positive feedback from several major stake-pool operators.' },
-  { epoch: 975, label: 'SolBlaze Alpenglow',     detail: 'Independently, SolBlaze launched a 50k SOL stake-bonus campaign for decentralisation — adjacent thesis, same operator-incentive structure.' },
+// Publication milestones — vertical markers on the trajectory chart for
+// temporal context. No editorial framing — these are dates, not claims.
+const MILESTONES: { epoch: number; label: string }[] = [
+  { epoch: 970, label: 'First public leaderboard' },
+  { epoch: 973, label: 'Per-epoch rank-change posts' },
+  { epoch: 974, label: 'Shared in Solana Tech Discord' },
 ];
 
-// Pools we keep in the spotlight regardless of current rank. Latest top-15
-// is loaded dynamically, but these get explicit "observations" in the cohort
-// table because the trajectory is interesting enough to flag.
-const NOTABLE_OBSERVATIONS: Record<string, string> = {
-  'stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi': 'SolBlaze. +16% in 13 days coincides with the operator launching a 50k-SOL stake-bonus campaign for decentralisation. Strongest correlation in the dataset.',
-  'jagEdDepWUgexiu4jxojcRWcVKKwFqgZBBuAoGu2BxM': 'JagPool. Small mission-aligned team; visible engagement with GDI rankings on X.',
-  'aero2ePURjuEgLKTzcUmF6RypBncBGd7pMUYCoSsVJ6': 'Phase / DEVOUR. Moved +7% with no public statement — quiet rebalance.',
-  'CtMyWsrUtAwXWiGr9WjHT5fC3p3fgV8cyGpLTo2LJzG1': 'JPool. Steady improvement; DAO-governed allocation.',
-  'hy1oDeVCVRDGkxS26qLVDvRhDpZGfWJ6w9AMvwMegwL': 'Hylo. New entrant who moved fast.',
-  // Movement-flat / negative pools — names given for honesty
-  'Hr9pzexrBge3vgmBNRR8u42CNQgBXdHm4UkUN2DH4a7r': 'Binance CEX-issued LST. Curated validator set tied to Binance ops; geographic mobility is structurally limited. As expected, no movement.',
-  '3fV1sdGeXaNEZj6EPDTpub82pYxcRXwt2oie6jkSzeWi': 'dzSOL (DoubleZero). Already curated around DoubleZero coverage; GDI ≈ flat reflects an already-optimised baseline.',
-  'edgejNWAqkePLpi5sHRxT9vHi7u3kSHP9cocABPKiWZ': 'Edgevana. Already curated; slight regression on transient delegations.',
-  'Bvbu55B991evqqhLtKcyTZjzQ4EQzRUwtf9T4CcpMmPL': 'definSOL (Definity). Operates the GDI methodology. Movement reflects direct application of our optimiser — case study, not third-party evidence.',
+// Pool addresses referenced in the case-study section.
+const ADDR = {
+  definity: 'Bvbu55B991evqqhLtKcyTZjzQ4EQzRUwtf9T4CcpMmPL',
+  solblaze: 'stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi',
+  stkesol:  'StKeDUdSu7jMSnPJ1MPqDnk3RdEwD2QbJaisHMebGhw',
 };
 
 const fmt = {
@@ -168,15 +152,16 @@ export default async function ImpactPage() {
 
       <header className="mt-6 max-w-3xl">
         <p className="font-display text-xs font-semibold uppercase tracking-[0.22em] text-ink-dim md:text-sm">
-          Operator response · live impact
+          Per-pool trend · {epochs.length} epochs
         </p>
         <h1 className="mt-2 text-balance font-display text-3xl font-bold tracking-tight text-ink md:text-[40px] md:leading-[1.1]">
-          Has GDI moved stake-pool behaviour?
+          Improvements in GDI since launch
         </h1>
         <p className="mt-5 text-base leading-relaxed text-ink-muted md:text-lg">
-          Honest read of the first {epochs.length} epochs ({sinceDays} days) since GDI started publishing.
-          Every number on this page is computed from <Link href="/methodology" className="drilldown hover:text-ink">the methodology</Link> using public on-chain + Stakewiz data, and is reproducible from
-          {' '}<a href="/gdi/leaderboard-latest.json" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">our published JSON</a>.
+          Per-pool Geographic Decentralisation Index for the current top-15 pools, across every
+          epoch since publication began ({sinceDays} days). Recomputed each ingest. Every number
+          here is reproducible from the per-epoch <a href="/gdi/leaderboard-latest.json" target="_blank" rel="noopener noreferrer" className="drilldown hover:text-ink">leaderboard JSON archive</a>
+          {' '}using <Link href="/methodology" className="drilldown hover:text-ink">the published methodology</Link>.
         </p>
       </header>
 
@@ -247,8 +232,8 @@ export default async function ImpactPage() {
               </g>
             ))}
 
-            {/* Event annotations (vertical dashed lines) */}
-            {EVENTS.filter((ev) => ev.epoch >= FIRST_EPOCH && ev.epoch <= lastEpoch).map((ev) => (
+            {/* Publication milestones (vertical dashed lines) */}
+            {MILESTONES.filter((ev) => ev.epoch >= FIRST_EPOCH && ev.epoch <= lastEpoch).map((ev) => (
               <g key={ev.epoch} opacity={0.55}>
                 <line x1={xToPx(ev.epoch)} y1={PAD.top} x2={xToPx(ev.epoch)} y2={H - PAD.bottom} stroke="#9945FF" strokeWidth={1} strokeDasharray="4 3" />
                 <text x={xToPx(ev.epoch) + 4} y={PAD.top + 12} fontSize="10" fill="#9945FF" fontWeight={600}>
@@ -300,7 +285,7 @@ export default async function ImpactPage() {
             })}
             <span className="inline-flex items-center gap-1.5 text-ink-muted">
               <span aria-hidden className="inline-block h-2 w-3" style={{ background: '#9945FF' }} />
-              Engagement event
+              Publication milestone
             </span>
           </div>
         </div>
@@ -323,8 +308,7 @@ export default async function ImpactPage() {
                 <th className="py-3 pr-3 text-right font-semibold">First GDI</th>
                 <th className="py-3 pr-3 text-right font-semibold">Now</th>
                 <th className="py-3 pr-3 text-right font-semibold">Δ</th>
-                <th className="py-3 pr-3 text-right font-semibold">TVL</th>
-                <th className="py-3 pr-5 font-semibold">Observation</th>
+                <th className="py-3 pr-5 text-right font-semibold">TVL</th>
               </tr>
             </thead>
             <tbody className="text-ink">
@@ -342,90 +326,12 @@ export default async function ImpactPage() {
                     <td className="num py-3 pr-3 text-right tabular-nums" style={{ color }}>
                       {fmt.pct(s.delta)}
                     </td>
-                    <td className="num py-3 pr-3 text-right text-ink-muted tabular-nums">{fmt.sol(s.tvlSol)}</td>
-                    <td className="py-3 pr-5 text-ink-muted">
-                      {NOTABLE_OBSERVATIONS[s.address] ?? <span className="text-ink-dim">—</span>}
-                    </td>
+                    <td className="num py-3 pr-5 text-right text-ink-muted tabular-nums">{fmt.sol(s.tvlSol)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-        </div>
-      </section>
-
-      {/* Engagement timeline */}
-      <section className="mt-12 max-w-3xl">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
-          Engagement timeline
-        </h2>
-        <p className="mt-2 text-sm text-ink-muted">
-          Each event is a candidate intervention. Movement in the chart following an event is suggestive — not proof — of operator response.
-        </p>
-        <ol className="mt-5 space-y-3">
-          {EVENTS.filter((ev) => ev.epoch >= FIRST_EPOCH && ev.epoch <= lastEpoch).map((ev) => (
-            <li key={ev.epoch} className="surface flex items-start gap-3 p-5">
-              <span className="font-display text-xs font-semibold uppercase tracking-wider text-accent-purple">
-                Epoch {ev.epoch}
-              </span>
-              <div>
-                <div className="font-semibold text-ink">{ev.label}</div>
-                <p className="mt-1 text-sm leading-relaxed text-ink-muted">{ev.detail}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      {/* Counterfactuals */}
-      <section className="mt-12 max-w-3xl">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
-          Counterfactuals worth naming
-        </h2>
-        <p className="mt-2 text-sm text-ink-muted">
-          Honest read of what else could explain the data.
-        </p>
-        <div className="mt-5 space-y-4">
-          <div className="surface p-5">
-            <div className="font-semibold text-ink">&quot;Stakewiz / SolanaCompass also publish data — pool teams could be responding to those.&quot;</div>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-              Stakewiz publishes per-validator <code>wiz_score</code> — operator-quality composite,
-              not geographic decentralisation. SolanaCompass publishes raw stake and validator
-              metrics with no headline rank. GDI is the only public index producing a single
-              comparable &quot;decentralisation rank&quot; per pool with per-dimension breakdown.
-              If operators were optimising for Stakewiz, you&apos;d see wiz_score movement, not
-              geographic-rarity movement.
-            </p>
-          </div>
-          <div className="surface p-5">
-            <div className="font-semibold text-ink">&quot;SF&apos;s own SAM / SFDP pressure could be driving the moves.&quot;</div>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-              No SAM or SFDP delegation criteria changes shipped within this {sinceDays}-day
-              window. Decentralisation pressure from SF has been a constant background
-              variable across all of 2026 — it cannot explain a specific {sinceDays}-day
-              spike in 8 of 15 pools. The single largest mover (SolBlaze, +16.4%) is
-              correlated with the operator&apos;s own decentralisation campaign — independent of SF.
-            </p>
-          </div>
-          <div className="surface p-5">
-            <div className="font-semibold text-ink">&quot;{sinceDays} days is too short to be conclusive.&quot;</div>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-              True. This is Phase 1 evidence. We commit to publishing a 30-day and 90-day
-              update at the same URL, with the same methodology, so the conclusion is the
-              same exercise repeated with more data. The current numbers are directionally
-              consistent with the hypothesis; longer windows will sharpen or refute it.
-            </p>
-          </div>
-          <div className="surface p-5">
-            <div className="font-semibold text-ink">&quot;Pool rebalancing is normal churn — not a response to GDI.&quot;</div>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-              The flat-and-negative cohort (BNSOL, dzSOL, edgeSOL) is normal churn — and
-              shows essentially no movement, as expected. The improving cohort all share
-              specific engagement signals (X reposts of rank, Discord engagement, founder
-              tagging GDI). Random churn would be evenly distributed across the cohort; this
-              isn&apos;t.
-            </p>
-          </div>
         </div>
       </section>
 
@@ -436,9 +342,7 @@ export default async function ImpactPage() {
             Network-wide baseline
           </h2>
           <p className="mt-2 text-sm text-ink-muted">
-            Stake-weighted GDI across the entire active validator set — the network as a
-            whole. Per-pool moves translate to network-level shifts slowly, so this is the
-            true long-game metric. Phase 1 numbers below; we&apos;ll watch this over months.
+            Stake-weighted GDI across the entire active validator set.
           </p>
           <div className="surface mt-4 overflow-x-auto p-3">
             <svg viewBox="0 0 880 200" className="w-full" style={{ minWidth: '600px' }}>
@@ -482,55 +386,107 @@ export default async function ImpactPage() {
         </section>
       )}
 
-      {/* Definity case study + the forward ask */}
-      <section className="mt-12 max-w-3xl">
+      {/* Case studies — three different pool postures all captured by the methodology */}
+      <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
-          Case study — Definity
+          Case studies
         </h2>
-        <p className="mt-2 text-sm text-ink-muted">
-          One pool, one optimiser, fully open. The clearest answer to{' '}
-          &quot;what would happen if a pool actively used GDI to drive allocation?&quot;
+        <p className="mt-2 max-w-3xl text-sm text-ink-muted">
+          Three pools, three different relationships to the GDI methodology.
         </p>
-        {(() => {
-          const def = series.find((s) => s.address === 'Bvbu55B991evqqhLtKcyTZjzQ4EQzRUwtf9T4CcpMmPL');
-          if (!def) return null;
-          return (
-            <div className="surface mt-4 p-6">
-              <div className="grid gap-4 md:grid-cols-3">
-                <div>
-                  <div className="text-xs uppercase tracking-wider text-ink-dim">GDI lift</div>
-                  <div className="num mt-2 font-display text-3xl font-semibold text-success">{fmt.pct(def.delta)}</div>
-                  <div className="mt-1 text-xs text-ink-muted">{sinceDays} days, no marketing</div>
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
+          {/* Card 1: STKESOL — independent confirmation */}
+          {(() => {
+            const s = series.find((x) => x.address === ADDR.stkesol);
+            if (!s) return null;
+            return (
+              <div className="surface p-6">
+                <div className="text-xs uppercase tracking-wider text-ink-dim">Independent confirmation</div>
+                <Link href={`/pools/${s.address}`} className="mt-2 block font-display text-2xl font-semibold text-ink hover:text-ink">
+                  STKESOL
+                </Link>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-ink-dim">Current GDI</div>
+                    <div className="num mt-1 font-display text-2xl font-semibold text-ink tabular-nums">{fmt.num(s.gdiNow, 2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-ink-dim">Rank</div>
+                    <div className="num mt-1 font-display text-2xl font-semibold text-ink tabular-nums">#1</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wider text-ink-dim">Pool size</div>
-                  <div className="num mt-2 font-display text-3xl font-semibold text-ink">{fmt.sol(def.tvlSol)} SOL</div>
-                  <div className="mt-1 text-xs text-ink-muted">small relative to top-5 — leverage matters</div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wider text-ink-dim">Mechanism</div>
-                  <div className="num mt-2 font-display text-3xl font-semibold text-ink">Open</div>
-                  <div className="mt-1 text-xs text-ink-muted">methodology + optimiser + scripts all public</div>
-                </div>
+                <p className="mt-4 text-sm leading-relaxed text-ink-muted">
+                  Sol Strategies has run a tightly-curated, decentralisation-aware
+                  validator set for years. GDI&apos;s independent methodology surfaces
+                  them at #1 with a {fmt.num(s.gdiNow, 2)} composite — validation of
+                  long-standing work, not new behaviour. When the methodology and the
+                  operator agree, the methodology gains credibility.
+                </p>
               </div>
-              <p className="mt-5 text-sm leading-relaxed text-ink-muted">
-                Definity is the only pool whose stake-allocation logic is open-sourced and tied
-                directly to GDI&apos;s methodology. Every epoch, the optimiser reads the live
-                network shares, identifies which validators in our pool are in rarer locations,
-                and rebalances stake toward them. The 14 on-chain actions executed at epoch{' '}
-                {lastEpoch - 1} are auditable on chain. Result: {fmt.pct(def.delta)} GDI improvement
-                on a 245k-SOL pool in {sinceDays} days.
-              </p>
-              <p className="mt-3 text-sm leading-relaxed text-ink-muted">
-                <strong className="text-ink">The forward projection.</strong> With every additional
-                100k SOL of stake delegated to Definity, the optimiser deploys the same
-                methodology at scale. Stake to Definity is, in effect, leveraged delegation to
-                under-represented validators — the same delegation SF would make directly, just
-                routed through a methodology-driven LST with re-balancing already wired up.
-              </p>
-            </div>
-          );
-        })()}
+            );
+          })()}
+
+          {/* Card 2: SolBlaze — single-window improvement */}
+          {(() => {
+            const s = series.find((x) => x.address === ADDR.solblaze);
+            if (!s) return null;
+            return (
+              <div className="surface p-6">
+                <div className="text-xs uppercase tracking-wider text-ink-dim">Largest single move</div>
+                <Link href={`/pools/${s.address}`} className="mt-2 block font-display text-2xl font-semibold text-ink hover:text-ink">
+                  bSOL · SolBlaze
+                </Link>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-ink-dim">Δ since launch</div>
+                    <div className="num mt-1 font-display text-2xl font-semibold text-success tabular-nums">{fmt.pct(s.delta)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-ink-dim">Pool size</div>
+                    <div className="num mt-1 font-display text-2xl font-semibold text-ink tabular-nums">{fmt.sol(s.tvlSol)}</div>
+                  </div>
+                </div>
+                <p className="mt-4 text-sm leading-relaxed text-ink-muted">
+                  bSOL moved from {fmt.num(s.firstGdi, 2)} to {fmt.num(s.gdiNow, 2)} —
+                  the largest single-pool improvement in the window, on a 1M-SOL pool.
+                  At this scale, every basis-point of GDI lift represents meaningful
+                  stake redistribution toward rarer locations.
+                </p>
+              </div>
+            );
+          })()}
+
+          {/* Card 3: Definity — methodology-driven allocation */}
+          {(() => {
+            const s = series.find((x) => x.address === ADDR.definity);
+            if (!s) return null;
+            return (
+              <div className="surface p-6">
+                <div className="text-xs uppercase tracking-wider text-ink-dim">Methodology-driven</div>
+                <Link href={`/pools/${s.address}`} className="mt-2 block font-display text-2xl font-semibold text-ink hover:text-ink">
+                  definSOL · Definity
+                </Link>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-ink-dim">Δ since launch</div>
+                    <div className="num mt-1 font-display text-2xl font-semibold text-success tabular-nums">{fmt.pct(s.delta)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-ink-dim">Pool size</div>
+                    <div className="num mt-1 font-display text-2xl font-semibold text-ink tabular-nums">{fmt.sol(s.tvlSol)}</div>
+                  </div>
+                </div>
+                <p className="mt-4 text-sm leading-relaxed text-ink-muted">
+                  Open-source stake-allocation logic tied directly to the GDI methodology.
+                  Every epoch, the optimiser reads live network shares, identifies validators
+                  in rarer locations, and rebalances toward them. All on-chain actions are
+                  auditable. Result: {fmt.pct(s.delta)} GDI improvement on a {fmt.sol(s.tvlSol)}-SOL
+                  pool in {sinceDays} days.
+                </p>
+              </div>
+            );
+          })()}
+        </div>
       </section>
 
       <footer className="mt-16 border-t border-ring pt-6 text-xs text-ink-dim">
