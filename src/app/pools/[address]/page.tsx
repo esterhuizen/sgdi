@@ -6,6 +6,7 @@ import { DEFAULT_TVL_FLOOR_SOL } from '@/lib/leaderboard-config';
 import { GdiLink } from '@/components/GdiLink';
 import { TrendChart } from '@/components/TrendChart';
 import { ClientDiversityCard } from '@/components/ClientDiversityCard';
+import { GradientStripChart } from '@/components/GradientStripChart';
 
 export const revalidate = 60;
 
@@ -184,6 +185,30 @@ export default async function PoolDetailPage({ params }: Props) {
         </div>
       </section>
 
+      {/* GDI gradient — at-a-glance per-validator above/below threshold view */}
+      <section className="mt-12">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
+          GDI gradient (g) per validator
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm text-ink-muted">
+          For each validator, <span className="font-mono">g</span> = the pool&apos;s
+          GDI lift per unit of stake added to that validator, normalised so the
+          pool&apos;s stake-weighted average sits at <span className="font-mono">1.0</span>.
+          Validators <span className="text-success">above the line</span> (g &gt; 1) are in
+          rarer locations than the pool&apos;s current mix — adding stake there raises GDI.
+          {' '}<span className="text-danger" style={{ color: '#f97583' }}>Below the line</span>{' '}
+          (g &lt; 1) lowers GDI when stake is added. Dot size = current stake.
+        </p>
+        <div className="surface mt-4 p-3 overflow-x-auto">
+          <GradientStripChart validators={validatorsSorted} />
+        </div>
+        <p className="mt-2 text-xs text-ink-dim">
+          g computed against SGDI&apos;s active-voting snapshot. The optimiser pulls network
+          shares fresh from Stakewiz each run, so absolute magnitudes can differ; the
+          qualitative ranking (who&apos;s above vs below the line) matches.
+        </p>
+      </section>
+
       {/* Per-validator breakdown */}
       <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
@@ -197,36 +222,49 @@ export default async function PoolDetailPage({ params }: Props) {
                 <th className="py-3 pr-3 font-semibold">Country</th>
                 <th className="py-3 pr-3 font-semibold">City</th>
                 <th className="py-3 pr-3 font-semibold">ASN</th>
+                <th className="py-3 pr-3 text-right font-semibold">g</th>
                 <th className="py-3 pr-5 text-right font-semibold">Stake</th>
               </tr>
             </thead>
             <tbody>
-              {validatorsSorted.map((v) => (
-                <tr key={v.pubkey} className="border-t border-ring">
-                  <td className="py-3 pl-5 pr-3 font-mono text-xs">
-                    <Link
-                      href={`/validator/${v.pubkey}`}
-                      className="drilldown text-ink-muted hover:text-ink"
-                      title="View this validator's decentralisation profile"
-                    >
-                      {fmt.addr(v.pubkey)}
-                    </Link>
-                  </td>
-                  <td className="py-3 pr-3 text-ink">{v.country || <span className="text-ink-dim">—</span>}</td>
-                  <td className="py-3 pr-3 text-ink">{v.city || <span className="text-ink-dim">—</span>}</td>
-                  <td className="py-3 pr-3 text-ink">
-                    {v.asn ? (
-                      <>
-                        {v.asn}
-                        {v.asn_name && <span className="ml-1 text-xs text-ink-dim">{v.asn_name}</span>}
-                      </>
-                    ) : (
-                      <span className="text-ink-dim">—</span>
-                    )}
-                  </td>
-                  <td className="num py-3 pr-5 text-right text-ink-muted">{fmt.sol(v.stake_sol)} SOL</td>
-                </tr>
-              ))}
+              {validatorsSorted.map((v) => {
+                const g = v.g ?? null;
+                const gColor =
+                  g == null ? 'text-ink-dim'
+                  : g > 1.02 ? 'text-success'
+                  : g < 0.98 ? ''
+                  : 'text-ink-muted';
+                const gStyle = g != null && g < 0.98 ? { color: '#f97583' } : undefined;
+                return (
+                  <tr key={v.pubkey} className="border-t border-ring">
+                    <td className="py-3 pl-5 pr-3 font-mono text-xs">
+                      <Link
+                        href={`/validator/${v.pubkey}`}
+                        className="drilldown text-ink-muted hover:text-ink"
+                        title="View this validator's decentralisation profile"
+                      >
+                        {fmt.addr(v.pubkey)}
+                      </Link>
+                    </td>
+                    <td className="py-3 pr-3 text-ink">{v.country || <span className="text-ink-dim">—</span>}</td>
+                    <td className="py-3 pr-3 text-ink">{v.city || <span className="text-ink-dim">—</span>}</td>
+                    <td className="py-3 pr-3 text-ink">
+                      {v.asn ? (
+                        <>
+                          {v.asn}
+                          {v.asn_name && <span className="ml-1 text-xs text-ink-dim">{v.asn_name}</span>}
+                        </>
+                      ) : (
+                        <span className="text-ink-dim">—</span>
+                      )}
+                    </td>
+                    <td className={`num py-3 pr-3 text-right tabular-nums ${gColor}`} style={gStyle}>
+                      {g == null ? '—' : g.toFixed(3)}
+                    </td>
+                    <td className="num py-3 pr-5 text-right text-ink-muted">{fmt.sol(v.stake_sol)} SOL</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

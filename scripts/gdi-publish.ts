@@ -329,6 +329,44 @@ async function main() {
   const rankByAddress = new Map(scoredPools.map((s, i) => [s.pool_address, i + 1]));
   const totalRanked = scoredPools.length;
 
+  // ── Active-set network shares ────────────────────────────────────────────
+  // Computed ONCE here, reused for:
+  //  - per-validator gradient `g` on each pool's latest.json (below);
+  //  - per-validator rarity_country/city/asn on validator-index.json (later).
+  //
+  // "Active" = not delinquent AND activated_stake > 0 — mirrors the validator-
+  // index definition (gdi-publish.ts:404). This denominator is slightly tighter
+  // than the one the ingest-time scorer uses for pool dc_*, so g shown on the
+  // pool page can drift ~3-5% from what the optimiser sees. Documented in the
+  // UI note next to the g-distribution chart.
+  const allValidators = storage.listAllValidators();
+  const RARITY_FLOOR = 1e-9;
+  const rarityFromShareViz = (share: number) =>
+    share > 0 ? -Math.log(share) : -Math.log(RARITY_FLOOR);
+  const activeByBucket = {
+    country: new Map<string, number>(),
+    city: new Map<string, number>(),
+    asn: new Map<string, number>(),
+  };
+  let totalActiveStakeSol = 0;
+  for (const v of allValidators) {
+    if (v.delinquent === 1) continue;
+    if (v.activated_stake_lamports == null || v.activated_stake_lamports <= 0) continue;
+    const stakeSol = Number(v.activated_stake_lamports) / 1e9;
+    totalActiveStakeSol += stakeSol;
+    if (v.country) activeByBucket.country.set(v.country, (activeByBucket.country.get(v.country) ?? 0) + stakeSol);
+    if (v.city)    activeByBucket.city.set(v.city,       (activeByBucket.city.get(v.city)       ?? 0) + stakeSol);
+    if (v.asn)     activeByBucket.asn.set(v.asn,         (activeByBucket.asn.get(v.asn)         ?? 0) + stakeSol);
+  }
+  const shareFor = (dim: 'country' | 'city' | 'asn', bucket: string | null): number => {
+    if (!bucket || totalActiveStakeSol <= 0) return 0;
+    return (activeByBucket[dim].get(bucket) ?? 0) / totalActiveStakeSol;
+  };
+  const rarityFor = (dim: 'country' | 'city' | 'asn', bucket: string | null): number | null => {
+    if (!bucket) return null;
+    return rarityFromShareViz(shareFor(dim, bucket));
+  };
+
   let poolsPublished = 0;
   for (const pool of pools) {
     const history = storage.listScoresForPool(pool.pool_address);
@@ -336,15 +374,37 @@ async function main() {
     if (!latestScore) continue;
     const snaps = storage.listSnapshotsForPoolEpoch(latestScore.epoch, pool.pool_address);
     const validatorsRichDir: ReturnType<typeof formatValidator>[] = [];
-    const validatorsInline = snaps.map((s) => {
+    // First pass: gather rarity + stake + bucket per validator.
+    type InlineRow = {
+      pubkey: string;
+      stake_sol: number;
+      country: string | null;
+      city: string | null;
+      asn: string | null;
+      asn_name: string | null;
+      wiz_score: number | null;
+      client_name: string | null;
+      client_version: string | null;
+      is_jito: boolean | null;
+      is_dz: boolean | null;
+      is_bam: boolean | null;
+      r_country: number | null;
+      r_city: number | null;
+      r_asn: number | null;
+      g: number | null;
+    };
+    const rows = snaps.map((s): InlineRow => {
       const v = storage.getValidator(s.validator_pubkey);
       if (v) validatorsRichDir.push(formatValidator(v));
+      const country = v?.country ?? null;
+      const city = v?.city ?? null;
+      const asn = v?.asn ?? null;
       return {
         pubkey: s.validator_pubkey,
         stake_sol: Number(s.stake_lamports) / 1e9,
-        country: v?.country ?? null,
-        city: v?.city ?? null,
-        asn: v?.asn ?? null,
+        country,
+        city,
+        asn,
         asn_name: v?.asn_name ?? null,
         wiz_score: v?.stakewiz_wiz_score ?? null,
         // Client diversity surface — inline so frontend pool page can render
@@ -354,8 +414,43 @@ async function main() {
         is_jito: v?.is_jito === null || v?.is_jito === undefined ? null : v.is_jito === 1,
         is_dz: v?.is_dz === null || v?.is_dz === undefined ? null : v.is_dz === 1,
         is_bam: v?.is_bam === null || v?.is_bam === undefined ? null : v.is_bam === 1,
+        r_country: rarityFor('country', country),
+        r_city:    rarityFor('city',    city),
+        r_asn:     rarityFor('asn',     asn),
+        g: null, // filled in below once pool dc_* is known
       };
     });
+
+    // Second pass: compute the pool's stake-weighted dc_* using the active-set
+    // rarities (intentionally NOT the official latestScore.dc_*; see denominator
+    // note next to activeByBucket above). Then compute g per validator.
+    // g = ((r_country/dc_country) + (r_city/dc_city) + (r_asn/dc_asn)) / 3
+    const dcViz = (dim: 'country' | 'city' | 'asn'): number | null => {
+      const rKey = dim === 'country' ? 'r_country' : dim === 'city' ? 'r_city' : 'r_asn';
+      let weighted = 0;
+      let placeable = 0;
+      for (const r of rows) {
+        const ri = r[rKey];
+        if (ri == null) continue;
+        weighted += r.stake_sol * ri;
+        placeable += r.stake_sol;
+      }
+      return placeable > 0 ? weighted / placeable : null;
+    };
+    const dc_country_viz = dcViz('country');
+    const dc_city_viz    = dcViz('city');
+    const dc_asn_viz     = dcViz('asn');
+    for (const r of rows) {
+      if (
+        r.r_country != null && r.r_city != null && r.r_asn != null &&
+        dc_country_viz != null && dc_country_viz > 0 &&
+        dc_city_viz    != null && dc_city_viz    > 0 &&
+        dc_asn_viz     != null && dc_asn_viz     > 0
+      ) {
+        r.g = ((r.r_country / dc_country_viz) + (r.r_city / dc_city_viz) + (r.r_asn / dc_asn_viz)) / 3;
+      }
+    }
+    const validatorsInline = rows;
 
     const poolDir = join(OUTPUT_DIR, 'pools', pool.pool_address);
     await atomicWriteJson(join(poolDir, 'latest.json'), {
@@ -387,8 +482,9 @@ async function main() {
     poolsPublished++;
   }
 
-  // 5. validators.json — directory of all known validators
-  const allValidators = storage.listAllValidators();
+  // 5. validators.json — directory of all known validators.
+  // `allValidators` was already loaded above when we built the active-set
+  // shares for per-pool g; reuse it here.
   await atomicWriteJson(join(OUTPUT_DIR, 'validators.json'), {
     last_published_at: new Date().toISOString(),
     count: allValidators.length,
@@ -440,17 +536,14 @@ async function main() {
     ibrl_score: number | null;
   };
 
-  const RARITY_FLOOR = 1e-9;
+  // RARITY_FLOOR + rarity() are local aliases for legibility of the next loop;
+  // the per-pool g loop above used `rarityFromShareViz` from the same shape.
   const rarity = (share: number | null) =>
     share == null || share <= 0 ? -Math.log(RARITY_FLOOR) : -Math.log(share);
 
+  // `activeByBucket` / `totalActiveStakeSol` were built above (active-set
+  // shares for per-pool g). Reuse them here instead of recomputing.
   const activeRows: ActiveRow[] = [];
-  const activeByBucket = {
-    country: new Map<string, number>(), // bucket -> sum of stake (SOL)
-    city: new Map<string, number>(),
-    asn: new Map<string, number>(),
-  };
-  let totalActiveStakeSol = 0;
 
   for (const v of allValidators) {
     // ACTIVE definition: not delinquent AND has stake. Mirrors what
@@ -458,10 +551,6 @@ async function main() {
     if (v.delinquent === 1) continue;
     if (v.activated_stake_lamports == null || v.activated_stake_lamports <= 0) continue;
     const stakeSol = Number(v.activated_stake_lamports) / 1e9;
-    totalActiveStakeSol += stakeSol;
-    if (v.country) activeByBucket.country.set(v.country, (activeByBucket.country.get(v.country) ?? 0) + stakeSol);
-    if (v.city)    activeByBucket.city.set(v.city,       (activeByBucket.city.get(v.city)       ?? 0) + stakeSol);
-    if (v.asn)     activeByBucket.asn.set(v.asn,         (activeByBucket.asn.get(v.asn)         ?? 0) + stakeSol);
     activeRows.push({
       vote_pubkey: v.validator_pubkey,
       identity_pubkey: v.identity_pubkey,

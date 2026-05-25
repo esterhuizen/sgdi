@@ -83,6 +83,15 @@ export type PoolValidator = {
   is_jito?: boolean | null;
   is_dz?: boolean | null;
   is_bam?: boolean | null;
+  // Per-validator network-rarity per dimension (-ln of bucket's stake share
+  // among active validators). Computed at publish time, see gdi-publish.ts.
+  r_country?: number | null;
+  r_city?: number | null;
+  r_asn?: number | null;
+  // GDI gradient: avg of (r_dim / pool_dc_dim) across the 3 dimensions.
+  // > 1 → adding stake here raises GDI; < 1 → lowers it. Uses the active-
+  // voting denominator (drift vs official optimiser ~3-5%; see UI footnote).
+  g?: number | null;
 };
 
 // Stake-weighted client breakdown per pool. Published by gdi-publish.
