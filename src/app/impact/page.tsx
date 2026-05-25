@@ -7,10 +7,30 @@ import { loadLeaderboard, loadLeaderboardForEpoch, loadNetworkBaseline } from '@
 
 export const revalidate = 60;
 
+// Both `openGraph` and `twitter` must be set explicitly — the root layout
+// declares them, and Next.js doesn't cascade `title`/`description` into
+// the parent's openGraph block. Without these, social cards would show
+// the leaderboard's title/description even though the image is /impact's.
+const PAGE_TITLE = 'Improvements in GDI since launch';
+const PAGE_DESCRIPTION =
+  'Per-pool Geographic Decentralisation Index trajectories for all top-15 Solana stake pools since publishing began. Live data, recomputed each ingest.';
+const PAGE_URL = 'https://gdindex.app/impact';
+
 export const metadata: Metadata = {
-  title: 'GDI impact — measured operator response',
-  description:
-    'Per-pool GDI trajectories across all Solana stake pools since the Geographic Decentralisation Index started publishing. Live data, recomputed each ingest.',
+  title: PAGE_TITLE,
+  description: PAGE_DESCRIPTION,
+  openGraph: {
+    title: PAGE_TITLE,
+    description: PAGE_DESCRIPTION,
+    url: PAGE_URL,
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: PAGE_TITLE,
+    description: PAGE_DESCRIPTION,
+  },
+  alternates: { canonical: PAGE_URL },
 };
 
 const FIRST_EPOCH = 969;
