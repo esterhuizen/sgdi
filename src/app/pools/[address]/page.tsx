@@ -6,7 +6,6 @@ import { DEFAULT_TVL_FLOOR_SOL } from '@/lib/leaderboard-config';
 import { GdiLink } from '@/components/GdiLink';
 import { TrendChart } from '@/components/TrendChart';
 import { ClientDiversityCard } from '@/components/ClientDiversityCard';
-import { GradientStripChart } from '@/components/GradientStripChart';
 
 export const revalidate = 60;
 
@@ -84,8 +83,16 @@ export default async function PoolDetailPage({ params }: Props) {
       .filter((b) => epochSet.has(b.epoch))
       .map((b) => ({ epoch: b.epoch, value: b.gdi }));
 
-  // Per-validator breakdown sorted by stake desc
-  const validatorsSorted = [...latest.validators].sort((a, b) => b.stake_sol - a.stake_sol);
+  // Per-validator breakdown sorted by gradient (g) descending — surfaces the
+  // most "GDI-improving" validators at the top. Validators with no g (missing
+  // location data) fall to the bottom; ties broken by stake desc so within a
+  // location group the bigger holder shows first.
+  const validatorsSorted = [...latest.validators].sort((a, b) => {
+    const ag = a.g ?? -Infinity;
+    const bg = b.g ?? -Infinity;
+    if (ag !== bg) return bg - ag;
+    return b.stake_sol - a.stake_sol;
+  });
 
   return (
     <main className="container-narrow py-14 md:py-20">
@@ -185,35 +192,20 @@ export default async function PoolDetailPage({ params }: Props) {
         </div>
       </section>
 
-      {/* GDI gradient — at-a-glance per-validator above/below threshold view */}
-      <section className="mt-12">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
-          GDI gradient (g) per validator
-        </h2>
-        <p className="mt-2 max-w-3xl text-sm text-ink-muted">
-          For each validator, <span className="font-mono">g</span> = the pool&apos;s
-          GDI lift per unit of stake added to that validator, normalised so the
-          pool&apos;s stake-weighted average sits at <span className="font-mono">1.0</span>.
-          Validators <span className="text-success">above the line</span> (g &gt; 1) are in
-          rarer locations than the pool&apos;s current mix — adding stake there raises GDI.
-          {' '}<span className="text-danger" style={{ color: '#f97583' }}>Below the line</span>{' '}
-          (g &lt; 1) lowers GDI when stake is added. Dot size = current stake.
-        </p>
-        <div className="surface mt-4 p-3 overflow-x-auto">
-          <GradientStripChart validators={validatorsSorted} />
-        </div>
-        <p className="mt-2 text-xs text-ink-dim">
-          g computed against SGDI&apos;s active-voting snapshot. The optimiser pulls network
-          shares fresh from Stakewiz each run, so absolute magnitudes can differ; the
-          qualitative ranking (who&apos;s above vs below the line) matches.
-        </p>
-      </section>
-
-      {/* Per-validator breakdown */}
+      {/* Per-validator breakdown — sorted by g (gradient) desc */}
       <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-dim">
           Validators (current epoch)
         </h2>
+        <p className="mt-2 max-w-3xl text-sm text-ink-muted">
+          Sorted by <span className="font-mono">g</span> — the GDI gradient at this
+          validator (stake-weighted pool average ≡ 1.0).{' '}
+          <span className="font-semibold text-success">g &gt; 1</span> means the validator is
+          in a rarer location than the pool&apos;s current mix — adding stake there
+          raises GDI.{' '}
+          <span className="font-semibold" style={{ color: '#f97583' }}>g &lt; 1</span> means
+          a more-common location; adding stake lowers GDI.
+        </p>
         <div className="surface mt-4 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-bg-muted/40 text-left text-xs uppercase tracking-[0.10em] text-ink-dim">
