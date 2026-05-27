@@ -563,26 +563,39 @@ async function main() {
         if (ip) ipByIdentity.set(n.pubkey, ip);
       }
 
+      // Normalisation helpers — the two sources store equivalent data in
+      // different shapes:
+      //   country: shadow=ISO-2 ("US"), canonical=full name ("United States")
+      //   asn:     shadow=bare number ("20326"), canonical="AS"-prefixed ("AS20326")
+      //   city:    same shape on both, just case/whitespace
+      // We store the RAW shapes in the table (preserves original data for
+      // forensics) but compute the match flags against normalised forms.
+      const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+      const expandIso2 = (s: string | null): string | null => {
+        if (!s) return s;
+        if (s.length !== 2) return s; // already a name (or unknown shape)
+        try { return regionNames.of(s.toUpperCase()) ?? s; } catch { return s; }
+      };
+      const stripAsPrefix = (s: string | null): string | null => {
+        if (!s) return s;
+        return s.replace(/^AS/i, '');
+      };
+      const eqCi = (a: string | null, b: string | null): number | null => {
+        if (a == null || b == null) return null;
+        return a.trim().toLowerCase() === b.trim().toLowerCase() ? 1 : 0;
+      };
+
       const shadowRows: ValidatorGeoShadowRow[] = [];
-      const trackedVoteKeys = new Set(enriched.map((v) => v.validator_pubkey));
       let matchCount = { country: 0, city: 0, asn: 0 };
       let mismatchCount = { country: 0, city: 0, asn: 0 };
       for (const v of enriched) {
-        if (!trackedVoteKeys.has(v.validator_pubkey)) continue;
         const ip = v.identity_pubkey ? ipByIdentity.get(v.identity_pubkey) ?? null : null;
         const shadow = geoip.lookup(ip);
 
-        // 1 = both non-null and equal, 0 = both non-null and differ, null = one side null
-        const matchOf = (a: string | null, b: string | null): number | null => {
-          if (a == null || b == null) return null;
-          // City compare is case-insensitive + trim-tolerant; ASN/country exact.
-          return a.trim().toLowerCase() === b.trim().toLowerCase() ? 1 : 0;
-        };
-        const country_match = (shadow.country == null || v.country == null) ? null
-          : (shadow.country === v.country ? 1 : 0);
-        const city_match    = matchOf(shadow.city, v.city);
-        const asn_match     = (shadow.asn == null || v.asn == null) ? null
-          : (shadow.asn === v.asn ? 1 : 0);
+        // Match flags computed AFTER normalisation; raw values written below.
+        const country_match = eqCi(expandIso2(shadow.country), v.country);
+        const city_match    = eqCi(shadow.city, v.city);
+        const asn_match     = eqCi(stripAsPrefix(shadow.asn), stripAsPrefix(v.asn));
 
         if (country_match === 1) matchCount.country++; else if (country_match === 0) mismatchCount.country++;
         if (city_match    === 1) matchCount.city++;    else if (city_match    === 0) mismatchCount.city++;
