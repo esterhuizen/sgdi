@@ -113,6 +113,22 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
   notes           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_epoch ON ingestion_runs(epoch, started_at);
+
+-- Per-epoch frozen snapshot of the network's stake distribution across
+-- each location dimension. Enables post-mortems of cross-epoch GDI swings
+-- ("which buckets gained / lost stake between epoch N-1 and N?") without
+-- depending on external historical data. ~600 rows per epoch.
+CREATE TABLE IF NOT EXISTS network_shares (
+  epoch           INTEGER NOT NULL,
+  dimension       TEXT    NOT NULL,   -- 'country' | 'city' | 'asn'
+  bucket          TEXT    NOT NULL,   -- e.g. 'United States', 'Frankfurt', '20473'
+  share           REAL    NOT NULL,   -- 0..1 fraction of placeable network stake
+  validator_count INTEGER NOT NULL,
+  computed_at     INTEGER NOT NULL,
+  PRIMARY KEY (epoch, dimension, bucket)
+);
+CREATE INDEX IF NOT EXISTS idx_network_shares_epoch ON network_shares(epoch);
+CREATE INDEX IF NOT EXISTS idx_network_shares_dim_bucket ON network_shares(dimension, bucket);
 `;
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -218,6 +234,15 @@ export type IngestionRun = {
   pools_processed: number | null;
   pools_failed: number | null;
   notes: string | null;
+};
+
+export type NetworkShareRow = {
+  epoch: number;
+  dimension: 'country' | 'city' | 'asn';
+  bucket: string;
+  share: number;
+  validator_count: number;
+  computed_at: number;
 };
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -412,6 +437,24 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     `),
     listBaselines: db.prepare(`SELECT * FROM network_baseline ORDER BY epoch DESC`),
 
+    upsertNetworkShare: db.prepare(`
+      INSERT INTO network_shares (epoch, dimension, bucket, share, validator_count, computed_at)
+      VALUES (@epoch, @dimension, @bucket, @share, @validator_count, @computed_at)
+      ON CONFLICT(epoch, dimension, bucket) DO UPDATE SET
+        share           = excluded.share,
+        validator_count = excluded.validator_count,
+        computed_at     = excluded.computed_at
+    `),
+    deleteNetworkSharesForEpoch: db.prepare(
+      `DELETE FROM network_shares WHERE epoch = ?`,
+    ),
+    listNetworkSharesForEpoch: db.prepare(
+      `SELECT * FROM network_shares WHERE epoch = ? ORDER BY dimension, share DESC`,
+    ),
+    listNetworkSharesForBucket: db.prepare(
+      `SELECT * FROM network_shares WHERE dimension = ? AND bucket = ? ORDER BY epoch DESC`,
+    ),
+
     insertRun: db.prepare(`
       INSERT INTO ingestion_runs (run_id, epoch, started_at, status, pools_processed, pools_failed, notes)
       VALUES (@run_id, @epoch, @started_at, @status, NULL, NULL, NULL)
@@ -543,6 +586,39 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     },
     listBaselines(): NetworkBaseline[] {
       return stmt.listBaselines.all() as NetworkBaseline[];
+    },
+
+    /**
+     * Persist a full per-epoch network-shares snapshot. Idempotent — replaces
+     * any existing rows for the epoch (a re-ingest within the same epoch should
+     * overwrite cleanly). Wrapped in a transaction so partial writes don't
+     * leave the table in a mixed state.
+     */
+    replaceNetworkSharesForEpoch(
+      epoch: number,
+      rows: { dimension: 'country' | 'city' | 'asn'; bucket: string; share: number; validator_count: number }[],
+      computedAt: number,
+    ): void {
+      const tx = db.transaction(() => {
+        stmt.deleteNetworkSharesForEpoch.run(epoch);
+        for (const r of rows) {
+          stmt.upsertNetworkShare.run({
+            epoch,
+            dimension: r.dimension,
+            bucket: r.bucket,
+            share: r.share,
+            validator_count: r.validator_count,
+            computed_at: computedAt,
+          });
+        }
+      });
+      tx();
+    },
+    listNetworkSharesForEpoch(epoch: number): NetworkShareRow[] {
+      return stmt.listNetworkSharesForEpoch.all(epoch) as NetworkShareRow[];
+    },
+    listNetworkSharesForBucket(dimension: 'country' | 'city' | 'asn', bucket: string): NetworkShareRow[] {
+      return stmt.listNetworkSharesForBucket.all(dimension, bucket) as NetworkShareRow[];
     },
 
     // Ingestion runs

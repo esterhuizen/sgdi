@@ -419,6 +419,34 @@ async function main() {
       city_buckets: networkShares.city.size,
       asn_buckets: networkShares.asn.size,
     });
+
+    // Freeze the snapshot into SQLite so cross-epoch GDI swings can be
+    // diagnosed without depending on external historical data (no Stakewiz
+    // historical bucket-share endpoint exists). One row per (epoch, dim,
+    // bucket); ~600 rows/epoch. Best-effort: a write failure here (e.g.
+    // pre-migration DB) shouldn't fail the whole ingest run.
+    try {
+      const counts = {
+        country: new Map<string, number>(),
+        city: new Map<string, number>(),
+        asn: new Map<string, number>(),
+      };
+      for (const [, meta] of baselineMeta) {
+        if (meta.country) counts.country.set(meta.country, (counts.country.get(meta.country) ?? 0) + 1);
+        if (meta.city)    counts.city.set(meta.city,       (counts.city.get(meta.city)       ?? 0) + 1);
+        if (meta.asn)     counts.asn.set(meta.asn,         (counts.asn.get(meta.asn)         ?? 0) + 1);
+      }
+      const shareRows: { dimension: 'country' | 'city' | 'asn'; bucket: string; share: number; validator_count: number }[] = [];
+      for (const dim of ['country', 'city', 'asn'] as const) {
+        for (const [bucket, share] of networkShares[dim]) {
+          shareRows.push({ dimension: dim, bucket, share, validator_count: counts[dim].get(bucket) ?? 0 });
+        }
+      }
+      storage.replaceNetworkSharesForEpoch(epoch, shareRows, nowSeconds());
+      log.info('network.shares.persisted', { epoch, rows: shareRows.length });
+    } catch (e) {
+      log.error('network.shares.persist.failed', { epoch, error: errMessage(e) });
+    }
   } else {
     log.error('network.shares.missing', {
       reason: 'stakewiz returned 0 validators; cannot compute scores',
