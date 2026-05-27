@@ -1,0 +1,37 @@
+# /etc/systemd/system/sgdi-geoip-refresh.service
+#
+# Oneshot — downloads fresh MaxMind GeoLite2 City + ASN .mmdb files to
+# /var/lib/sgdi/geoip/. Triggered weekly by sgdi-geoip-refresh.timer.
+#
+# This unit is part of the SGDI shadow-geoip rollout; the .mmdb files
+# back the locally-hosted IP→country/city/ASN lookup that will eventually
+# replace the Stakewiz dependency. While in shadow mode the files are
+# CONSUMED (per-validator lookups) but the answers don't yet feed live
+# scoring — they go to validator_geo_shadow for comparison.
+
+[Unit]
+Description=Refresh MaxMind GeoLite2 City + ASN databases for SGDI
+Documentation=file:///var/www/sgdi/current/scripts/refresh-geoip.mjs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=definity
+Group=definity
+WorkingDirectory=/var/www/sgdi/current
+Environment=SGDI_GEOIP_DIR=/var/lib/sgdi/geoip
+# License key + (unused) account id, mode 640 root:definity.
+EnvironmentFile=-/etc/default/sgdi-geoip.env
+ExecStart=/usr/bin/node --experimental-strip-types scripts/refresh-geoip.mjs
+TimeoutStartSec=300
+
+# Hardening — same template as pool-stats; needs AF_INET{,6} for the download.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/sgdi/geoip
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true

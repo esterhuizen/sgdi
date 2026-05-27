@@ -1,0 +1,25 @@
+# /etc/systemd/system/sgdi-geoip-refresh.timer
+#
+# Weekly MaxMind GeoLite2 refresh. MaxMind publishes updated .mmdb files
+# every Tuesday; we run on Wednesday early-AM UTC to pick those up reliably.
+#
+# Persistent=true so a missed run catches up on next boot. RandomizedDelaySec
+# scatters the start across a 30-min window so we're not a thundering herd
+# against MaxMind's servers.
+#
+# Enable: sudo systemctl daemon-reload && sudo systemctl enable --now sgdi-geoip-refresh.timer
+# Force run: sudo systemctl start sgdi-geoip-refresh.service
+# Inspect:   systemctl list-timers sgdi-geoip-refresh.timer
+# Logs:      journalctl -u sgdi-geoip-refresh.service -n 100
+
+[Unit]
+Description=Weekly MaxMind GeoLite2 refresh
+
+[Timer]
+OnCalendar=Wed 03:00:00 UTC
+RandomizedDelaySec=30min
+Persistent=true
+Unit=sgdi-geoip-refresh.service
+
+[Install]
+WantedBy=timers.target
