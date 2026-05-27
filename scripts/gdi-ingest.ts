@@ -26,7 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createLogger } from '../src/lib/gdi/logger.ts';
-import { openStorage } from '../src/lib/gdi/storage.ts';
+import { openStorage, type ValidatorGeoShadowRow } from '../src/lib/gdi/storage.ts';
 import {
   createRpc,
   fetchPoolDelegations,
@@ -152,7 +152,7 @@ async function main() {
       // client_version (replaces validators.app's broken software_client).
       const clusterNodesData = await rpc.getClusterNodes().catch((e) => {
         log.warn('cluster_nodes.fetch.failed', { error: errMessage(e) });
-        return [] as Array<{ pubkey: string; version: string | null }>;
+        return [] as Awaited<ReturnType<typeof rpc.getClusterNodes>>;
       });
       const clusterNodesMap = new Map(clusterNodesData.map((n) => [n.pubkey, { version: n.version }]));
       const stakewizMap = new Map(swData.map((v) => [v.vote_identity, v]));
@@ -349,7 +349,10 @@ async function main() {
   // client_version (replaces validators.app's broken software_client).
   const clusterNodesData = await rpc.getClusterNodes().catch((e) => {
     log.warn('cluster_nodes.fetch.failed', { error: errMessage(e) });
-    return [] as Array<{ pubkey: string; version: string | null }>;
+    // Match the post-edit getClusterNodes shape so downstream consumers
+    // (including the shadow-geoip pass which reads gossip/tpu) keep typing
+    // even when the RPC errored.
+    return [] as Awaited<ReturnType<typeof rpc.getClusterNodes>>;
   });
   const clusterNodesMap = new Map(clusterNodesData.map((n) => [n.pubkey, { version: n.version }]));
 
@@ -533,6 +536,87 @@ async function main() {
     } catch (e) {
       log.error('baseline.failed', { error: errMessage(e) });
     }
+  }
+
+  // 8b. Shadow-geoip pass — for each tracked validator, look up country / city
+  //     / ASN via the locally-hosted MaxMind databases and persist the result
+  //     alongside a snapshot of canonical for later comparison. Strictly
+  //     additive: NOTHING in the live scoring path reads from
+  //     validator_geo_shadow today. Promotion to canonical is a separate
+  //     change. Best-effort: a failure here can't tank the ingest run.
+  try {
+    const { createLocalGeoip } = await import('../src/lib/gdi/data-sources/local-geoip.ts');
+    const geoipRes = await createLocalGeoip();
+    if (!geoipRes.ok) {
+      log.warn('geo.shadow.skipped', { reason: geoipRes.reason, detail: geoipRes.detail });
+    } else {
+      const { geoip } = geoipRes;
+      // Build an identity-pubkey → IP map from the cluster-nodes snapshot.
+      // `clusterNodesData` is keyed by NODE identity; the validators table joins
+      // identity → vote pubkey via validators.identity_pubkey.
+      const ipByIdentity = new Map<string, string>();
+      for (const n of clusterNodesData) {
+        const endpoint = n.gossip ?? n.tpu ?? null;
+        if (!endpoint) continue;
+        const colon = endpoint.lastIndexOf(':');
+        const ip = colon > 0 ? endpoint.slice(0, colon) : endpoint;
+        if (ip) ipByIdentity.set(n.pubkey, ip);
+      }
+
+      const shadowRows: ValidatorGeoShadowRow[] = [];
+      const trackedVoteKeys = new Set(enriched.map((v) => v.validator_pubkey));
+      let matchCount = { country: 0, city: 0, asn: 0 };
+      let mismatchCount = { country: 0, city: 0, asn: 0 };
+      for (const v of enriched) {
+        if (!trackedVoteKeys.has(v.validator_pubkey)) continue;
+        const ip = v.identity_pubkey ? ipByIdentity.get(v.identity_pubkey) ?? null : null;
+        const shadow = geoip.lookup(ip);
+
+        // 1 = both non-null and equal, 0 = both non-null and differ, null = one side null
+        const matchOf = (a: string | null, b: string | null): number | null => {
+          if (a == null || b == null) return null;
+          // City compare is case-insensitive + trim-tolerant; ASN/country exact.
+          return a.trim().toLowerCase() === b.trim().toLowerCase() ? 1 : 0;
+        };
+        const country_match = (shadow.country == null || v.country == null) ? null
+          : (shadow.country === v.country ? 1 : 0);
+        const city_match    = matchOf(shadow.city, v.city);
+        const asn_match     = (shadow.asn == null || v.asn == null) ? null
+          : (shadow.asn === v.asn ? 1 : 0);
+
+        if (country_match === 1) matchCount.country++; else if (country_match === 0) mismatchCount.country++;
+        if (city_match    === 1) matchCount.city++;    else if (city_match    === 0) mismatchCount.city++;
+        if (asn_match     === 1) matchCount.asn++;     else if (asn_match     === 0) mismatchCount.asn++;
+
+        shadowRows.push({
+          epoch,
+          validator_pubkey: v.validator_pubkey,
+          ip_used: ip,
+          shadow_country: shadow.country,
+          shadow_city: shadow.city,
+          shadow_asn: shadow.asn,
+          shadow_asn_name: shadow.asn_org,
+          canonical_country: v.country,
+          canonical_city: v.city,
+          canonical_asn: v.asn,
+          canonical_asn_name: v.asn_name,
+          country_match,
+          city_match,
+          asn_match,
+          computed_at: nowSeconds(),
+        });
+      }
+      storage.replaceGeoShadowForEpoch(epoch, shadowRows);
+      log.info('geo.shadow.persisted', {
+        epoch,
+        rows: shadowRows.length,
+        match_country: matchCount.country, mismatch_country: mismatchCount.country,
+        match_city: matchCount.city,       mismatch_city: mismatchCount.city,
+        match_asn: matchCount.asn,         mismatch_asn: mismatchCount.asn,
+      });
+    }
+  } catch (e) {
+    log.error('geo.shadow.failed', { epoch, error: errMessage(e) });
   }
 
   // 9. Finalise the run.

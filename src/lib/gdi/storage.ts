@@ -129,6 +129,43 @@ CREATE TABLE IF NOT EXISTS network_shares (
 );
 CREATE INDEX IF NOT EXISTS idx_network_shares_epoch ON network_shares(epoch);
 CREATE INDEX IF NOT EXISTS idx_network_shares_dim_bucket ON network_shares(dimension, bucket);
+
+-- Shadow IP→geo answers from the locally-hosted MaxMind pipeline, captured
+-- per-validator per-epoch alongside whatever canonical (Stakewiz/VA-derived)
+-- thought at the same epoch. Powers a side-by-side comparison while we
+-- evaluate whether MaxMind is good enough to promote to canonical.
+--
+-- Nothing in the live scoring path reads this table. See scripts/gdi-ingest.ts
+-- for the write site (separate pass after the canonical enrichment).
+CREATE TABLE IF NOT EXISTS validator_geo_shadow (
+  epoch                INTEGER NOT NULL,
+  validator_pubkey     TEXT    NOT NULL,
+  ip_used              TEXT,             -- the IP we looked up (gossip preferred, then tpu)
+
+  -- Shadow side
+  shadow_country       TEXT,
+  shadow_city          TEXT,
+  shadow_asn           TEXT,
+  shadow_asn_name      TEXT,
+
+  -- Snapshot of canonical at this epoch (for diff without a join later)
+  canonical_country    TEXT,
+  canonical_city       TEXT,
+  canonical_asn        TEXT,
+  canonical_asn_name   TEXT,
+
+  -- Precomputed agreement flags: 1 = match, 0 = mismatch, NULL = one side null.
+  -- Lets the comparison CLI do aggregate queries in O(rows) without
+  -- recomputing string compares.
+  country_match        INTEGER,
+  city_match           INTEGER,
+  asn_match            INTEGER,
+
+  computed_at          INTEGER NOT NULL,
+  PRIMARY KEY (epoch, validator_pubkey)
+);
+CREATE INDEX IF NOT EXISTS idx_geo_shadow_epoch ON validator_geo_shadow(epoch);
+CREATE INDEX IF NOT EXISTS idx_geo_shadow_mismatch ON validator_geo_shadow(epoch, country_match, city_match, asn_match);
 `;
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -242,6 +279,25 @@ export type NetworkShareRow = {
   bucket: string;
   share: number;
   validator_count: number;
+  computed_at: number;
+};
+
+export type ValidatorGeoShadowRow = {
+  epoch: number;
+  validator_pubkey: string;
+  ip_used: string | null;
+  shadow_country: string | null;
+  shadow_city: string | null;
+  shadow_asn: string | null;
+  shadow_asn_name: string | null;
+  canonical_country: string | null;
+  canonical_city: string | null;
+  canonical_asn: string | null;
+  canonical_asn_name: string | null;
+  // 1 / 0 / null — null when one side is null (we can't really call match/mismatch)
+  country_match: number | null;
+  city_match: number | null;
+  asn_match: number | null;
   computed_at: number;
 };
 
@@ -455,6 +511,42 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
       `SELECT * FROM network_shares WHERE dimension = ? AND bucket = ? ORDER BY epoch DESC`,
     ),
 
+    upsertValidatorGeoShadow: db.prepare(`
+      INSERT INTO validator_geo_shadow (
+        epoch, validator_pubkey, ip_used,
+        shadow_country, shadow_city, shadow_asn, shadow_asn_name,
+        canonical_country, canonical_city, canonical_asn, canonical_asn_name,
+        country_match, city_match, asn_match,
+        computed_at
+      ) VALUES (
+        @epoch, @validator_pubkey, @ip_used,
+        @shadow_country, @shadow_city, @shadow_asn, @shadow_asn_name,
+        @canonical_country, @canonical_city, @canonical_asn, @canonical_asn_name,
+        @country_match, @city_match, @asn_match,
+        @computed_at
+      )
+      ON CONFLICT(epoch, validator_pubkey) DO UPDATE SET
+        ip_used            = excluded.ip_used,
+        shadow_country     = excluded.shadow_country,
+        shadow_city        = excluded.shadow_city,
+        shadow_asn         = excluded.shadow_asn,
+        shadow_asn_name    = excluded.shadow_asn_name,
+        canonical_country  = excluded.canonical_country,
+        canonical_city     = excluded.canonical_city,
+        canonical_asn      = excluded.canonical_asn,
+        canonical_asn_name = excluded.canonical_asn_name,
+        country_match      = excluded.country_match,
+        city_match         = excluded.city_match,
+        asn_match          = excluded.asn_match,
+        computed_at        = excluded.computed_at
+    `),
+    listGeoShadowForEpoch: db.prepare(
+      `SELECT * FROM validator_geo_shadow WHERE epoch = ? ORDER BY validator_pubkey`,
+    ),
+    listGeoShadowForValidator: db.prepare(
+      `SELECT * FROM validator_geo_shadow WHERE validator_pubkey = ? ORDER BY epoch DESC`,
+    ),
+
     insertRun: db.prepare(`
       INSERT INTO ingestion_runs (run_id, epoch, started_at, status, pools_processed, pools_failed, notes)
       VALUES (@run_id, @epoch, @started_at, @status, NULL, NULL, NULL)
@@ -619,6 +711,23 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     },
     listNetworkSharesForBucket(dimension: 'country' | 'city' | 'asn', bucket: string): NetworkShareRow[] {
       return stmt.listNetworkSharesForBucket.all(dimension, bucket) as NetworkShareRow[];
+    },
+
+    /**
+     * Bulk-write a full per-epoch shadow snapshot. Wrapped in a transaction so
+     * a partial write can't leave half-populated rows for the epoch.
+     */
+    replaceGeoShadowForEpoch(epoch: number, rows: ValidatorGeoShadowRow[]): void {
+      const tx = db.transaction(() => {
+        for (const r of rows) stmt.upsertValidatorGeoShadow.run(r);
+      });
+      tx();
+    },
+    listGeoShadowForEpoch(epoch: number): ValidatorGeoShadowRow[] {
+      return stmt.listGeoShadowForEpoch.all(epoch) as ValidatorGeoShadowRow[];
+    },
+    listGeoShadowForValidator(pubkey: string): ValidatorGeoShadowRow[] {
+      return stmt.listGeoShadowForValidator.all(pubkey) as ValidatorGeoShadowRow[];
     },
 
     // Ingestion runs

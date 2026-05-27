@@ -167,15 +167,35 @@ export function createRpc({ url, timeoutMs = 30_000, logger }: RpcOptions) {
      * Keyed by node IDENTITY pubkey.
      */
     async getClusterNodes(): Promise<
-      Array<{ pubkey: string; version: string | null; featureSet: number | null }>
+      Array<{
+        pubkey: string;
+        version: string | null;
+        featureSet: number | null;
+        // "ip:port" strings as Solana RPC reports them. null when a node
+        // isn't advertising that endpoint or is behind NAT. Consumed by
+        // the shadow-geoip pass; the rest of ingest only needs `version`.
+        gossip: string | null;
+        tpu: string | null;
+        rpc: string | null;
+      }>
     > {
       const r = await call<
-        Array<{ pubkey: string; version?: string | null; featureSet?: number | null }>
+        Array<{
+          pubkey: string;
+          version?: string | null;
+          featureSet?: number | null;
+          gossip?: string | null;
+          tpu?: string | null;
+          rpc?: string | null;
+        }>
       >('getClusterNodes', []);
       return r.map((n) => ({
         pubkey: n.pubkey,
         version: n.version ?? null,
         featureSet: n.featureSet ?? null,
+        gossip: n.gossip ?? null,
+        tpu: n.tpu ?? null,
+        rpc: n.rpc ?? null,
       }));
     },
   };
