@@ -585,12 +585,32 @@ async function main() {
         return a.trim().toLowerCase() === b.trim().toLowerCase() ? 1 : 0;
       };
 
+      // Operator overrides — layered on top of MaxMind for the shadow side
+      // ONLY. A null field means "no override for this dimension; use the
+      // MaxMind value". Lets us encode known-wrong cases and have them flow
+      // into the comparison.
+      const overrideByPubkey = new Map(
+        storage.listGeoOverrides().map((o) => [o.validator_pubkey, o]),
+      );
+      let overridesApplied = 0;
+
       const shadowRows: ValidatorGeoShadowRow[] = [];
       let matchCount = { country: 0, city: 0, asn: 0 };
       let mismatchCount = { country: 0, city: 0, asn: 0 };
       for (const v of enriched) {
         const ip = v.identity_pubkey ? ipByIdentity.get(v.identity_pubkey) ?? null : null;
-        const shadow = geoip.lookup(ip);
+        const lookup = geoip.lookup(ip);
+
+        // Apply any per-validator override on the shadow side. Each field
+        // independently: override > MaxMind. asn_name is also overridable.
+        const ov = overrideByPubkey.get(v.validator_pubkey);
+        if (ov) overridesApplied++;
+        const shadow = ov ? {
+          country: ov.country ?? lookup.country,
+          city:    ov.city    ?? lookup.city,
+          asn:     ov.asn     ?? lookup.asn,
+          asn_org: ov.asn_name ?? lookup.asn_org,
+        } : lookup;
 
         // Match flags computed AFTER normalisation; raw values written below.
         const country_match = eqCi(expandIso2(shadow.country), v.country);
@@ -623,6 +643,7 @@ async function main() {
       log.info('geo.shadow.persisted', {
         epoch,
         rows: shadowRows.length,
+        overrides_applied: overridesApplied,
         match_country: matchCount.country, mismatch_country: mismatchCount.country,
         match_city: matchCount.city,       mismatch_city: mismatchCount.city,
         match_asn: matchCount.asn,         mismatch_asn: mismatchCount.asn,

@@ -166,6 +166,28 @@ CREATE TABLE IF NOT EXISTS validator_geo_shadow (
 );
 CREATE INDEX IF NOT EXISTS idx_geo_shadow_epoch ON validator_geo_shadow(epoch);
 CREATE INDEX IF NOT EXISTS idx_geo_shadow_mismatch ON validator_geo_shadow(epoch, country_match, city_match, asn_match);
+
+-- Operator-supplied corrections for cases where automated geo lookup
+-- (MaxMind / Stakewiz / VA) gets the answer wrong. Partial overrides
+-- are supported — any combination of country/city/asn may be set, and
+-- a NULL field means "no override on this dimension, fall through".
+--
+-- Initially these only affect the shadow computation in validator_geo_shadow
+-- (helps us evaluate the override workflow without changing live scoring).
+-- Promotion of overrides into the canonical pipeline (pickField in
+-- enrichment.ts) is a separate, single-line change down the line.
+CREATE TABLE IF NOT EXISTS validator_geo_overrides (
+  validator_pubkey TEXT PRIMARY KEY,
+  country          TEXT,       -- nullable: partial overrides supported
+  city             TEXT,
+  asn              TEXT,
+  asn_name         TEXT,
+  reason           TEXT NOT NULL,   -- mandatory rationale
+  source_evidence  TEXT,            -- optional URL / chat ref / email
+  added_at         INTEGER NOT NULL,
+  added_by         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_overrides_added_at ON validator_geo_overrides(added_at);
 `;
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -280,6 +302,18 @@ export type NetworkShareRow = {
   share: number;
   validator_count: number;
   computed_at: number;
+};
+
+export type ValidatorGeoOverrideRow = {
+  validator_pubkey: string;
+  country: string | null;
+  city: string | null;
+  asn: string | null;
+  asn_name: string | null;
+  reason: string;
+  source_evidence: string | null;
+  added_at: number;
+  added_by: string;
 };
 
 export type ValidatorGeoShadowRow = {
@@ -547,6 +581,31 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
       `SELECT * FROM validator_geo_shadow WHERE validator_pubkey = ? ORDER BY epoch DESC`,
     ),
 
+    upsertGeoOverride: db.prepare(`
+      INSERT INTO validator_geo_overrides
+        (validator_pubkey, country, city, asn, asn_name, reason, source_evidence, added_at, added_by)
+      VALUES
+        (@validator_pubkey, @country, @city, @asn, @asn_name, @reason, @source_evidence, @added_at, @added_by)
+      ON CONFLICT(validator_pubkey) DO UPDATE SET
+        country         = excluded.country,
+        city            = excluded.city,
+        asn             = excluded.asn,
+        asn_name        = excluded.asn_name,
+        reason          = excluded.reason,
+        source_evidence = excluded.source_evidence,
+        added_at        = excluded.added_at,
+        added_by        = excluded.added_by
+    `),
+    deleteGeoOverride: db.prepare(
+      `DELETE FROM validator_geo_overrides WHERE validator_pubkey = ?`,
+    ),
+    getGeoOverride: db.prepare(
+      `SELECT * FROM validator_geo_overrides WHERE validator_pubkey = ?`,
+    ),
+    listGeoOverrides: db.prepare(
+      `SELECT * FROM validator_geo_overrides ORDER BY added_at DESC`,
+    ),
+
     insertRun: db.prepare(`
       INSERT INTO ingestion_runs (run_id, epoch, started_at, status, pools_processed, pools_failed, notes)
       VALUES (@run_id, @epoch, @started_at, @status, NULL, NULL, NULL)
@@ -728,6 +787,20 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     },
     listGeoShadowForValidator(pubkey: string): ValidatorGeoShadowRow[] {
       return stmt.listGeoShadowForValidator.all(pubkey) as ValidatorGeoShadowRow[];
+    },
+
+    upsertGeoOverride(row: ValidatorGeoOverrideRow): void {
+      stmt.upsertGeoOverride.run(row);
+    },
+    deleteGeoOverride(pubkey: string): number {
+      const r = stmt.deleteGeoOverride.run(pubkey) as { changes: number };
+      return r.changes;
+    },
+    getGeoOverride(pubkey: string): ValidatorGeoOverrideRow | undefined {
+      return stmt.getGeoOverride.get(pubkey) as ValidatorGeoOverrideRow | undefined;
+    },
+    listGeoOverrides(): ValidatorGeoOverrideRow[] {
+      return stmt.listGeoOverrides.all() as ValidatorGeoOverrideRow[];
     },
 
     // Ingestion runs
