@@ -347,6 +347,21 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
   // to the data directory.
   if (!opts.readonly) {
     mkdirSync(dirname(dbPath), { recursive: true });
+  } else {
+    // Even readonly callers need the schema migration to have happened —
+    // prepared statements at the bottom of this function reference tables
+    // that may not exist yet on a DB where no writable open has run since
+    // the last schema bump. Best-effort: open writable, run the idempotent
+    // migration, close. If the caller doesn't have write access we silently
+    // skip — the prepare step will then fail on missing tables, which is the
+    // same outcome as before.
+    try {
+      const migrationDb = new Database(dbPath, {});
+      migrationDb.exec(SCHEMA_SQL);
+      migrationDb.close();
+    } catch {
+      // No write access — proceed readonly; older tables still work.
+    }
   }
   const db: Db = new Database(dbPath, opts.readonly ? { readonly: true } : {});
   if (!opts.readonly) {
