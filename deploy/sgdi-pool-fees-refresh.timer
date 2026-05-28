@@ -1,0 +1,28 @@
+# /etc/systemd/system/sgdi-pool-fees-refresh.timer
+#
+# Daily fee snapshot refresh. Fee changes are rare but operators do queue
+# them (next-epoch-fee fields go non-None for a cycle before activation),
+# and the per-epoch frozen file gives us a write-once historical trail.
+#
+# Fires at 04:00 UTC daily — after the weekly GeoIP refresh window
+# (Wed 03:00) so they don't collide, and well before any business-hours
+# operations.
+#
+# Persistent=true catches up missed runs. RandomizedDelaySec=15min
+# spreads load if multiple sgdi hosts ever exist.
+#
+# Enable: sudo systemctl daemon-reload && sudo systemctl enable --now sgdi-pool-fees-refresh.timer
+# Force:  sudo systemctl start sgdi-pool-fees-refresh.service
+# Logs:   journalctl -u sgdi-pool-fees-refresh.service -n 100
+
+[Unit]
+Description=Daily SGDI pool-fees refresh
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+RandomizedDelaySec=15min
+Persistent=true
+Unit=sgdi-pool-fees-refresh.service
+
+[Install]
+WantedBy=timers.target

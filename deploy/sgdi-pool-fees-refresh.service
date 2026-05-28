@@ -1,0 +1,42 @@
+# /etc/systemd/system/sgdi-pool-fees-refresh.service
+#
+# Oneshot — pulls per-pool fee structures via `splsp list` for every pool
+# in the leaderboard above SGDI_FEE_MIN_STAKE_SOL (default 100k SOL), parses
+# the output, and writes a structured JSON snapshot to:
+#
+#   $SGDI_PUBLISHED_DIR/pool-fees-latest.json     (current pointer)
+#   $SGDI_PUBLISHED_DIR/pool-fees-{epoch}.json    (frozen per-epoch)
+#
+# Triggered by sgdi-pool-fees-refresh.timer (daily). Fee changes are rare
+# but real (operators can queue them via sync-pool); a daily cadence
+# catches them within a day without spamming RPC.
+
+[Unit]
+Description=Refresh SGDI per-pool fee snapshot via splsp
+Documentation=file:///var/www/sgdi/current/scripts/refresh-pool-fees.mjs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=definity
+Group=definity
+WorkingDirectory=/var/www/sgdi/current
+Environment=SGDI_PUBLISHED_DIR=/var/lib/sgdi/published
+Environment=SPLSP_BIN=/home/sol/.cargo/bin/splsp
+# Inherits HELIUS_RPC_URL from /etc/default/sgdi.env (same env file the
+# rest of SGDI ingest uses). definity must be in `sol` group to execute
+# splsp at /home/sol/.cargo/bin/.
+EnvironmentFile=-/etc/default/sgdi.env
+ExecStart=/usr/bin/node --experimental-strip-types scripts/refresh-pool-fees.mjs
+TimeoutStartSec=300
+
+# Hardening — same template as the other refresh oneshots.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/var/lib/sgdi
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
