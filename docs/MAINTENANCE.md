@@ -95,8 +95,12 @@ To point staging at the shadow world (current default):
   `/etc/nginx/sites-available/gdindex-staging`.
 - `sgdi-staging.service` has a drop-in at
   `/etc/systemd/system/sgdi-staging.service.d/shadow.conf` setting
-  `SGDI_PUBLISHED_DIR=/var/lib/sgdi/published-shadow` (template at
-  `deploy/sgdi-staging-shadow.conf` in this repo).
+  `SGDI_PUBLISHED_DIR=/var/lib/sgdi/published-shadow` and
+  `SGDI_FALLBACK_PUBLISHED_DIR=/var/lib/sgdi/published` (template at
+  `deploy/sgdi-staging-shadow.conf` in this repo). The fallback env var is
+  what makes pages that iterate historical epochs (e.g. `/impact`) keep
+  rendering — `loadJson` in `src/lib/data.ts` tries the shadow dir first,
+  falls through to canonical for files Pass B doesn't produce.
 
 To toggle staging back to canonical: revert the nginx alias and remove
 the systemd drop-in, then `nginx -s reload && systemctl restart sgdi-staging`.
