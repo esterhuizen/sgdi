@@ -65,13 +65,13 @@ echo "==> Reloading service: $SERVICE"
 sudo systemctl restart "$SERVICE"
 
 # Purge Cloudflare cache so users see the new build immediately rather
-# than waiting up to 4h for the max-age TTL to expire. Sources the env
-# file via sudo cat (definity has read access via group). Failure is
-# logged but doesn't fail the deploy — the worst case is users see
-# stale content for a few minutes, which is fine.
-if [[ -r "$RELEASE/scripts/purge-cloudflare.mjs" ]]; then
+# than waiting up to 4h for the max-age TTL to expire. /etc/default/sgdi.env
+# is mode 640 root:definity, so definity can read it directly — no sudo
+# needed here. Failure is logged but doesn't fail the deploy: worst case
+# is users see stale content for a few minutes, which is acceptable.
+if [[ -r "$RELEASE/scripts/purge-cloudflare.mjs" && -r /etc/default/sgdi.env ]]; then
     echo "==> Purging Cloudflare cache"
-    if sudo bash -c "set -a; source /etc/default/sgdi.env; set +a; node $RELEASE/scripts/purge-cloudflare.mjs"; then
+    if ( set -a; source /etc/default/sgdi.env; set +a; node "$RELEASE/scripts/purge-cloudflare.mjs" ); then
         :
     else
         echo "    (purge failed — cache will expire naturally within max-age)"
