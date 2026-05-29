@@ -67,10 +67,36 @@ sites read:
 - Schema migrations to `gdi.db`
 
 For those: dry-run with a fixture JSON, OR deploy to staging+prod
-together knowing both sites flip atomically. There's currently no
-"staging-only data" path. (If we add one later, isolate by env-var:
-`SGDI_PUBLISHED_DIR=/var/lib/sgdi-staging/published` and run a parallel
-ingest writing there.)
+together knowing both sites flip atomically.
+
+#### Shadow geo mode (staging-only world)
+
+Staging *can* render a parallel "shadow" world that's scored from
+MaxMind + operator-override geo while prod stays on Stakewiz/Validators.app.
+This was added as the safe rollout path for the MaxMind cutover.
+
+How it works: every successful ingest cycle runs a Pass B inside
+`scripts/gdi-publish.ts` (`runShadowPass`, in `scripts/gdi-publish-shadow.ts`)
+that re-merges per-validator geo, recomputes shadow scores into the
+`pool_scores_shadow` / `network_baseline_shadow` / `network_shares_shadow`
+tables, and writes a parallel published tree at `/var/lib/sgdi/published-shadow/`.
+Pass B failures don't affect canonical publish — they just log and bail.
+
+To point staging at the shadow world (current default):
+
+- nginx alias on `test.gdindex.app` aliases `/gdi/` →
+  `/var/lib/sgdi/published-shadow/` (see `/etc/nginx/sites-available/gdindex-staging`).
+- `sgdi-staging.service` has a drop-in at
+  `/etc/systemd/system/sgdi-staging.service.d/shadow.conf` setting
+  `SGDI_PUBLISHED_DIR=/var/lib/sgdi/published-shadow` (template at
+  `deploy/sgdi-staging-shadow.conf` in this repo).
+
+To toggle staging back to canonical: revert the nginx alias and remove
+the systemd drop-in, then `nginx -s reload && systemctl restart sgdi-staging`.
+
+Prod (`gdindex.app`) is **not** wired to the shadow tree — its nginx
+config still aliases `/var/lib/sgdi/published/` and `sgdi.service` reads
+the same canonical dir.
 
 Note: the prod `gdi-ingest.service` runs from
 `/var/www/sgdi/current/scripts/gdi-ingest.ts` — staging deploys do
