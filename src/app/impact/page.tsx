@@ -35,6 +35,24 @@ export const metadata: Metadata = {
 
 const FIRST_EPOCH = 969;
 
+// Temporary exclusion: at epoch 978 we switched the canonical geo backend
+// from Stakewiz to MaxMind, which corrected some long-standing
+// country/city/ASN misclassifications for a handful of pools. The result
+// was step-changes in their pool-level GDI big enough to dominate the
+// chart's y-axis and warp the visual story of every other pool. These
+// pools are excluded from the top-15 trajectory chart until the shadow
+// window closes around epoch 987 — by then the 969-977 canonical history
+// rolls off the left edge of the chart's display window naturally and
+// the discontinuity is no longer in frame.
+//
+// REMOVE THIS LIST when the chart's leftmost displayed epoch crosses 978
+// (currently the chart shows all epochs from FIRST_EPOCH, so the trigger
+// is: epoch 987 + whatever delay you want; or bump FIRST_EPOCH past 978).
+const TEMP_EXCLUDED_POOLS_UNTIL_EPOCH_987 = new Set<string>([
+  'HQLwnQJFH7t9nBTP4vbdW4eHy62aecfDnj8te8VzqkFL', // BdMLRsol  — GDI ~1.79 → 3.42
+  'spp1mo6shdcrRyqDK2zdurJ8H5uttZE6H6oVjHxN1QN', // xSHIN     — GDI ~2.56 → 3.04
+]);
+
 // Publication milestones — vertical markers on the trajectory chart for
 // temporal context. No editorial framing — these are dates, not claims.
 const MILESTONES: { epoch: number; label: string }[] = [
@@ -80,8 +98,11 @@ export default async function ImpactPage() {
   for (const e of epochs) leaderboards[e] = await loadLeaderboardForEpoch(e);
 
   // Latest top-15 pools (filtered to >= 100k SOL, the standard TVL floor).
+  // Also drops the temporarily-excluded pools — see comment on
+  // TEMP_EXCLUDED_POOLS_UNTIL_EPOCH_987 above.
   const top15 = (latest.pools ?? [])
     .filter((p) => p.gdi != null && (p.total_stake_sol ?? 0) >= 100_000)
+    .filter((p) => !TEMP_EXCLUDED_POOLS_UNTIL_EPOCH_987.has(p.pool_address))
     .sort((a, b) => (b.gdi ?? 0) - (a.gdi ?? 0))
     .slice(0, 15);
 
