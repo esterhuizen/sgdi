@@ -53,6 +53,12 @@ rm -rf ".next/standalone/public" ".next/standalone/.next/static"
 ln -s ../../public ".next/standalone/public"
 ln -s ../../static ".next/standalone/.next/static"
 
+# Drop build-time prerendered HTMLs — same reason as deploy.sh: the build
+# can't see /var/lib/sgdi/published/, so the baked ISR pages are all the
+# "Awaiting first ingest" empty state. Delete them so first request
+# re-SSRs with live data.
+find ".next/standalone/.next/server/app" -maxdepth 3 -name "*.html" -delete
+
 # Atomic symlink swap
 ln -sfn "$RELEASE" "$APP_ROOT/current.new"
 mv -Tf "$APP_ROOT/current.new" "$APP_ROOT/current"
