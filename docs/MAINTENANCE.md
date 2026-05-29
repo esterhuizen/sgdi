@@ -133,6 +133,37 @@ Two read-only CLIs surface the rollout's progress:
   and will need a single canonical format at promotion time — that's
   the next PR.
 
+#### Daily TG diff summary
+
+`sgdi-shadow-diff-tg.timer` fires `sgdi-shadow-diff-tg.service` once per
+day (default 19:00 UTC ≈ 7 am NZ). The service runs
+`scripts/post-shadow-diff-to-tg.ts`, which calls the diff CLI in `--json`
+mode, formats a compact ~1 KB message, and posts it to the SGDI ops
+chat via `sendSgdiAlert` from `src/lib/gdi/telegram.ts`.
+
+Enable:
+```sh
+sudo cp deploy/sgdi-shadow-diff-tg.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now sgdi-shadow-diff-tg.timer
+```
+
+Force a run (sends to TG immediately):
+```sh
+sudo systemctl start sgdi-shadow-diff-tg.service
+journalctl -u sgdi-shadow-diff-tg.service -n 50 --no-pager
+```
+
+Preview the message without sending (no TG creds in env):
+```sh
+cd /var/www/sgdi/current
+env -u TELEGRAM_BOT_TOKEN -u TELEGRAM_CHAT_ID \
+  node --experimental-strip-types scripts/post-shadow-diff-to-tg.ts
+```
+
+Disable for the cutover (when shadow becomes canonical and the diff
+goes to zero): `sudo systemctl disable --now sgdi-shadow-diff-tg.timer`.
+
 Note: the prod `gdi-ingest.service` runs from
 `/var/www/sgdi/current/scripts/gdi-ingest.ts` — staging deploys do
 NOT change which ingest code runs. To test ingest changes, the prod
