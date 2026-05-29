@@ -298,6 +298,27 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
       client_distribution: clientDistByPool.get(pool.pool_address) ?? null,
       validators: validatorsInline,
     });
+
+    // Stitch canonical pre-shadow scores into the shadow history.json for
+    // this pool. Same rationale as the network-baseline merge above: shadow
+    // has only been running since Pass B was deployed (epoch 978+), so
+    // shadow's per-pool history would otherwise be a single point. The
+    // pool detail page's trend chart needs continuity 969→978 to show the
+    // shadow jump as a visible step. Shadow wins per-epoch where both exist.
+    const shadowPoolHistory = storage.listShadowScoresForPool(pool.pool_address);
+    const shadowEpochs = new Set(shadowPoolHistory.map((s) => s.epoch));
+    const canonicalPoolHistory = storage.listScoresForPool(pool.pool_address)
+      .filter((s) => !shadowEpochs.has(s.epoch));
+    const mergedHistory = [...shadowPoolHistory, ...canonicalPoolHistory]
+      .sort((a, b) => b.epoch - a.epoch);
+    await atomicWriteJson(join(shadowOutputDir, 'pools', pool.pool_address, 'history.json'), {
+      pool: {
+        address: pool.pool_address,
+        name: pool.pool_name,
+      },
+      methodology_version: METHODOLOGY_VERSION,
+      history: mergedHistory.map(formatPoolScore),
+    });
   }
 
   // ── Shadow validator-index.json + validators.json ──
