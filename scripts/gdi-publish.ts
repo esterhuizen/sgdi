@@ -28,6 +28,7 @@ import { dirname, join, resolve } from 'node:path';
 import { adhocLogger } from '../src/lib/gdi/logger.ts';
 import { openStorage, type ValidatorRow, type PoolScore, type NetworkBaseline } from '../src/lib/gdi/storage.ts';
 import { METHODOLOGY_VERSION } from '../src/lib/gdi/scoring.ts';
+import { runShadowPass } from './gdi-publish-shadow.ts';
 
 const OUTPUT_DIR = resolve(process.env.SGDI_PUBLISHED_DIR || './public/gdi');
 
@@ -717,6 +718,40 @@ async function main() {
     cities_top: topN(cityAgg, 25),
     asns_top: topN(asnAgg, 25),
   });
+
+  // ─── PASS B: shadow scoring ─────────────────────────────────────────────
+  // Mirror Pass A's outputs, but populated from MERGED geo
+  // (override > maxmind > stakewiz/canonical). Writes to a parallel
+  // /var/lib/sgdi/published-shadow/ directory. Failure here is logged but
+  // doesn't fail the cycle — Pass A is already complete by this point.
+  //
+  // Toggled by SGDI_SHADOW_ENABLED. Default ON; set to 'false' to skip.
+  const SHADOW_OUTPUT_DIR = resolve(
+    process.env.SGDI_SHADOW_PUBLISHED_DIR || `${OUTPUT_DIR}-shadow`,
+  );
+  if (process.env.SGDI_SHADOW_ENABLED !== 'false') {
+    try {
+      const shadowResult = await runShadowPass({
+        storage,
+        latestEpoch,
+        shadowOutputDir: SHADOW_OUTPUT_DIR,
+        pools: pools.map((p) => ({
+          pool_address: p.pool_address,
+          pool_name: p.pool_name,
+          pool_program: p.pool_program,
+          pool_token_mint: p.pool_token_mint,
+        })),
+        clientDistByPool: clientDistByPool as Map<string, unknown>,
+        networkClientDistribution,
+        log,
+      });
+      log.info('shadow.pass.done', shadowResult);
+    } catch (e) {
+      log.error('shadow.pass.failed', { error: e instanceof Error ? e.message : String(e) });
+    }
+  } else {
+    log.info('shadow.pass.skipped', { reason: 'SGDI_SHADOW_ENABLED=false' });
+  }
 
   log.info('publish.finish', {
     epoch: latestEpoch,
