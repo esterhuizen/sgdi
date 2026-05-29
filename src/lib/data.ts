@@ -4,6 +4,17 @@
 // In prod: SGDI_PUBLISHED_DIR env points at /var/lib/sgdi/published/, which
 // nginx also serves at /gdi/* via a `location /gdi/ { alias ... }` block.
 //
+// On the staging shadow-geo build, SGDI_PUBLISHED_DIR points at
+// /var/lib/sgdi/published-shadow/ (the parallel tree written by Pass B —
+// see scripts/gdi-publish-shadow.ts). That tree only carries the files
+// Pass B generates: leaderboard-{epoch,latest}, network-baseline, per-pool,
+// validator-index, validators. Everything else — methodology, pool-fees,
+// concentration-crosscheck, historical leaderboards from before the shadow
+// rollout — only exists in canonical. If SGDI_FALLBACK_PUBLISHED_DIR is set,
+// loadJson tries it second, so /impact (which iterates historical epochs)
+// and other geo-independent pages keep rendering. This mirrors the nginx
+// `try_files $uri @gdi_canonical` behaviour on test.gdindex.app.
+//
 // All loaders return null on missing/malformed file rather than throwing —
 // the UI shows a "coming soon" state rather than a 500.
 
@@ -13,14 +24,26 @@ import { join, resolve } from 'node:path';
 const PUBLISHED_DIR = resolve(
   process.env.SGDI_PUBLISHED_DIR || join(process.cwd(), 'public/gdi'),
 );
+const FALLBACK_PUBLISHED_DIR = process.env.SGDI_FALLBACK_PUBLISHED_DIR
+  ? resolve(process.env.SGDI_FALLBACK_PUBLISHED_DIR)
+  : null;
 
-async function loadJson<T>(relativePath: string): Promise<T | null> {
+async function readJsonAt<T>(absDir: string, relativePath: string): Promise<T | null> {
   try {
-    const raw = await readFile(join(PUBLISHED_DIR, relativePath), 'utf8');
+    const raw = await readFile(join(absDir, relativePath), 'utf8');
     return JSON.parse(raw) as T;
   } catch {
     return null;
   }
+}
+
+async function loadJson<T>(relativePath: string): Promise<T | null> {
+  const primary = await readJsonAt<T>(PUBLISHED_DIR, relativePath);
+  if (primary != null) return primary;
+  if (FALLBACK_PUBLISHED_DIR != null && FALLBACK_PUBLISHED_DIR !== PUBLISHED_DIR) {
+    return readJsonAt<T>(FALLBACK_PUBLISHED_DIR, relativePath);
+  }
+  return null;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
