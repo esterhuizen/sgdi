@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { loadLeaderboard, loadLeaderboardForEpoch } from '@/lib/data';
+import { isImpactExcluded } from '@/lib/impact-exclusion';
 
 // 1200×630 OG card for /impact — per-pool GDI trajectories since launch.
 // Hero: cohort breadth (X of N pools improved >3%). Supporting row: avg
@@ -37,8 +38,10 @@ export default async function Image() {
   const lastEpoch = latest?.epoch ?? FIRST_EPOCH;
 
   // Current top-15 (≥100k SOL TVL, matches the page).
+  // Excludes the temp-suppressed pools — see @/lib/impact-exclusion.
   const top15 = (latest?.pools ?? [])
     .filter((p) => p.gdi != null && (p.total_stake_sol ?? 0) >= 100_000)
+    .filter((p) => !isImpactExcluded(p.pool_address))
     .sort((a, b) => (b.gdi ?? 0) - (a.gdi ?? 0))
     .slice(0, 15);
 
