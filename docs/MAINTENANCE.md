@@ -80,12 +80,19 @@ How it works: every successful ingest cycle runs a Pass B inside
 that re-merges per-validator geo, recomputes shadow scores into the
 `pool_scores_shadow` / `network_baseline_shadow` / `network_shares_shadow`
 tables, and writes a parallel published tree at `/var/lib/sgdi/published-shadow/`.
-Pass B failures don't affect canonical publish — they just log and bail.
+Pass B writes `leaderboard-{epoch,latest}.json`, `network-baseline.json`,
+per-pool `pools/<addr>/latest.json`, `validator-index.json`, and
+`validators.json` — all geo-dependent files. Pass B failures don't affect
+canonical publish — they just log and bail.
 
 To point staging at the shadow world (current default):
 
-- nginx alias on `test.gdindex.app` aliases `/gdi/` →
-  `/var/lib/sgdi/published-shadow/` (see `/etc/nginx/sites-available/gdindex-staging`).
+- nginx on `test.gdindex.app` aliases `/gdi/` →
+  `/var/lib/sgdi/published-shadow/` and falls through to
+  `/var/lib/sgdi/published/` via a `@gdi_canonical` named location for any
+  file not in the shadow tree (methodology, pool-fees, historical
+  leaderboards, concentration-crosscheck — all geo-independent). See
+  `/etc/nginx/sites-available/gdindex-staging`.
 - `sgdi-staging.service` has a drop-in at
   `/etc/systemd/system/sgdi-staging.service.d/shadow.conf` setting
   `SGDI_PUBLISHED_DIR=/var/lib/sgdi/published-shadow` (template at

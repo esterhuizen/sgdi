@@ -291,6 +291,157 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
     });
   }
 
+  // ── Shadow validator-index.json + validators.json ──
+  // Mirrors Pass A's lines 486-649 in gdi-publish.ts. Per-validator rarity
+  // is recomputed against shadowShares (active-set fractions over merged
+  // geo) so the /validator page on staging shows the shadow world's view
+  // of who's rare. Without this, nginx falls through to the canonical file
+  // and the page silently shows canonical rankings — defeating the point
+  // of running shadow on staging.
+  const totalActiveStakeSol = Number(shadowBaselineRow.total_stake_lamports ?? 0n) / 1e9;
+  const rarityOf = (share: number | null): number | null =>
+    share == null || share <= 0 ? null : -Math.log(share);
+
+  type ShadowActiveRow = {
+    vote_pubkey: string;
+    identity_pubkey: string | null;
+    identity_name: string | null;
+    image_url: string | null;
+    country: string | null;
+    city: string | null;
+    asn: string | null;
+    asn_name: string | null;
+    geo_sources: MergedGeo['sources'] | null;
+    activated_stake_sol: number;
+    network_share_country: number | null;
+    network_share_city: number | null;
+    network_share_asn: number | null;
+    rarity_country: number | null;
+    rarity_city: number | null;
+    rarity_asn: number | null;
+    composite_rarity: number | null;
+    is_dz: boolean | null;
+    is_jito: boolean | null;
+    is_bam: boolean | null;
+    client_name: string | null;
+    client_version: string | null;
+    wiz_score: number | null;
+    ibrl_score: number | null;
+  };
+
+  const activeRows: ShadowActiveRow[] = [];
+  for (const v of allValidators) {
+    if (v.delinquent === 1) continue;
+    if (v.activated_stake_lamports == null || v.activated_stake_lamports <= 0) continue;
+    const merged = mergedByPubkey.get(v.validator_pubkey);
+    const stakeSol = Number(v.activated_stake_lamports) / 1e9;
+    const countryShare = merged?.country ? (shadowShares.country.get(merged.country) ?? null) : null;
+    const cityShare    = merged?.city    ? (shadowShares.city.get(merged.city)       ?? null) : null;
+    const asnShare     = merged?.asn     ? (shadowShares.asn.get(merged.asn)         ?? null) : null;
+    const rCountry = rarityOf(countryShare);
+    const rCity    = rarityOf(cityShare);
+    const rAsn     = rarityOf(asnShare);
+    const composite = (rCountry != null && rCountry > 0 && rCity != null && rCity > 0 && rAsn != null && rAsn > 0)
+      ? Math.cbrt(rCountry * rCity * rAsn)
+      : null;
+    activeRows.push({
+      vote_pubkey: v.validator_pubkey,
+      identity_pubkey: v.identity_pubkey,
+      identity_name: v.identity_name,
+      image_url: v.image_url,
+      country: merged?.country ?? null,
+      city: merged?.city ?? null,
+      asn: merged?.asn ?? null,
+      asn_name: merged?.asn_name ?? null,
+      geo_sources: merged?.sources ?? null,
+      activated_stake_sol: stakeSol,
+      network_share_country: countryShare,
+      network_share_city: cityShare,
+      network_share_asn: asnShare,
+      rarity_country: rCountry,
+      rarity_city: rCity,
+      rarity_asn: rAsn,
+      composite_rarity: composite,
+      is_dz: v.is_dz == null ? null : v.is_dz === 1,
+      is_jito: v.is_jito == null ? null : v.is_jito === 1,
+      is_bam: v.is_bam == null ? null : v.is_bam === 1,
+      client_name: v.client_name,
+      client_version: v.client_version,
+      wiz_score: v.stakewiz_wiz_score,
+      ibrl_score: v.ibrl_score,
+    });
+  }
+
+  const rankable = activeRows.filter((r) => r.composite_rarity != null);
+  rankable.sort((a, b) => (b.composite_rarity ?? 0) - (a.composite_rarity ?? 0));
+  const rankByVote = new Map<string, number>();
+  rankable.forEach((r, i) => rankByVote.set(r.vote_pubkey, i + 1));
+  const medianRarity = rankable.length > 0
+    ? rankable[Math.floor(rankable.length / 2)].composite_rarity ?? null
+    : null;
+
+  const indexed = activeRows
+    .map((r) => ({
+      ...r,
+      rank: rankByVote.get(r.vote_pubkey) ?? null,
+      percentile: rankByVote.get(r.vote_pubkey) != null
+        ? +((rankByVote.get(r.vote_pubkey)! / rankable.length) * 100).toFixed(2)
+        : null,
+    }))
+    .sort((a, b) => {
+      if (a.rank == null && b.rank == null) return 0;
+      if (a.rank == null) return 1;
+      if (b.rank == null) return -1;
+      return a.rank - b.rank;
+    });
+
+  await atomicWriteJson(join(shadowOutputDir, 'validator-index.json'), {
+    last_published_at: new Date().toISOString(),
+    epoch: latestEpoch,
+    methodology_version: METHODOLOGY_VERSION,
+    active_set_definition: "Stakewiz: !delinquent AND activated_stake > 0 (shadow geo: override > maxmind > stakewiz)",
+    active_count: activeRows.length,
+    rankable_count: rankable.length,
+    total_active_stake_sol: totalActiveStakeSol,
+    median_composite_rarity: medianRarity,
+    validators: indexed,
+  });
+
+  // validators.json — full directory using merged geo. The /validator/[pk]
+  // detail page reads this for image_url + identity_name; we want shadow
+  // geo to flow into it too so the detail page is consistent with the index.
+  await atomicWriteJson(join(shadowOutputDir, 'validators.json'), {
+    last_published_at: new Date().toISOString(),
+    count: allValidators.length,
+    validators: allValidators.map((v) => {
+      const merged = mergedByPubkey.get(v.validator_pubkey);
+      return {
+        vote_pubkey: v.validator_pubkey,
+        identity_pubkey: v.identity_pubkey,
+        identity_name: v.identity_name,
+        image_url: v.image_url,
+        country: merged?.country ?? null,
+        city: merged?.city ?? null,
+        asn: merged?.asn ?? null,
+        asn_name: merged?.asn_name ?? null,
+        geo_sources: merged?.sources ?? null,
+        activated_stake_lamports: v.activated_stake_lamports == null
+          ? null
+          : String(v.activated_stake_lamports),
+        delinquent: v.delinquent === 1,
+        client_name: v.client_name,
+        client_version: v.client_version,
+        wiz_score: v.stakewiz_wiz_score,
+        ibrl_score: v.ibrl_score,
+      };
+    }),
+  });
+  log.info('shadow.validator_index.written', {
+    active: activeRows.length,
+    rankable: rankable.length,
+    median_composite_rarity: medianRarity,
+  });
+
   // ── Shadow leaderboard ──
   // Rank by shadow GDI desc. Mirrors Pass A's inclusion rule (real GDI, ≥1 validator).
   const scoredLeaderboard = shadowPoolScores
