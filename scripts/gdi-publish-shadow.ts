@@ -193,10 +193,19 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
     methodology_version: b.methodology_version,
   });
 
+  // Shadow has only been running since Pass B was deployed; for older epochs
+  // we don't have shadow baselines. Stitch in canonical baselines for the
+  // pre-shadow epochs so /impact's network trend renders continuously.
+  // Where both exist for the same epoch, shadow wins (it's the more
+  // up-to-date "view of the world" for that epoch under shadow methodology).
   const allShadowBaselines = storage.listShadowBaselines();
+  const shadowEpochs = new Set(allShadowBaselines.map((b) => b.epoch));
+  const canonicalBaselines = storage.listBaselines().filter((b) => !shadowEpochs.has(b.epoch));
+  const mergedBaselines = [...allShadowBaselines, ...canonicalBaselines]
+    .sort((a, b) => b.epoch - a.epoch);
   await atomicWriteJson(join(shadowOutputDir, 'network-baseline.json'), {
     latest: formatBaseline(shadowBaselineRow),
-    history: allShadowBaselines.map(formatBaseline),
+    history: mergedBaselines.map(formatBaseline),
   });
 
   // ── Per-pool shadow scores ──
