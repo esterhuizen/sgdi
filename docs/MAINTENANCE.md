@@ -173,6 +173,69 @@ Note: the prod `gdi-ingest.service` runs from
 NOT change which ingest code runs. To test ingest changes, the prod
 release must be updated (which means: merge to main, deploy prod).
 
+## Geo data sources + merge logic
+
+How `country` / `city` / `asn` / `asn_name` get resolved for every active
+validator. Lives in `src/lib/gdi/data-sources/merge-geo.ts`; covered by
+15 unit tests in `tests/merge-geo.test.ts`.
+
+### Priority chain (per-dimension, first non-null wins)
+
+| Priority | Source | What it is | Notes |
+|---|---|---|---|
+| 1 | **override** | Operator-confirmed value in `validator_geo_overrides` table | Highest trust — manually verified. CRUD via `bin/geo-override.mjs`. |
+| 2 | **maxmind** | Locally-hosted GeoLite2-City + GeoLite2-ASN lookup against the validator's gossip IP | Refreshed weekly by `sgdi-geoip-refresh.timer` (Wed 03:00 UTC). Returns ISO-2 country, bare ASN. |
+| 3 | **stakewiz** | The pre-cutover canonical row (which itself merged Stakewiz primary + Validators.app secondary at ingest time) | Returns display-name country, AS-prefixed ASN. |
+| 4 | *validators-app* | Pre-merged into the canonical stakewiz row at ingest — never reached as a separate fall-through in current code. Kept in the API for completeness. | — |
+
+**Per-dimension independence:** each of `country`, `city`, `asn`,
+`asn_name` picks its winner independently. A partial override that only
+sets `country` still lets MaxMind answer for `city`; a MaxMind result
+that has `country` but missing `city` still lets Stakewiz answer for
+`city`. The four fields on one validator can come from up to four
+different sources, and that's intentional.
+
+### Output normalization
+
+Applied after picking the winner. The reason this happens **at merge
+time** rather than at display time: the bucket keys for network-share
+calculations use these strings directly. Without normalization,
+validators whose country came from MaxMind (`"NL"`) would land in a
+different bucket from ones from Stakewiz (`"Netherlands"`), splitting
+the share and inflating GDI. Normalization fixes the math, not just
+the UI.
+
+| Field | Normalization | Examples |
+|---|---|---|
+| country | ISO-2 → English display name via `Intl.DisplayNames`. Plus two manual overrides for SAR codes where Intl's UN-formal name is worse UX | `"NL"` → `"Netherlands"`, `"HK"` → `"Hong Kong"` (not `"Hong Kong SAR China"`), `"MO"` → `"Macao"` |
+| asn | Strip any `AS` prefix (case-insensitive), then prepend `AS` | `"24940"` → `"AS24940"`, `"as0"` → `"AS0"` |
+| city | Trimmed, otherwise unchanged | `"  Amsterdam  "` → `"Amsterdam"` |
+| asn_name | Trimmed, otherwise unchanged | Org names like `"Hetzner Online GmbH"` |
+
+If you want to add another SAR / disputed-region override, edit
+`COUNTRY_NAME_OVERRIDES` in `merge-geo.ts` — keep that list small,
+it's an exception list, not a translation table.
+
+### Provenance tracking
+
+Every published validator row carries a `geo_sources` object recording
+which source won each dimension. Surfaces in
+`pools/<addr>/latest.json` (under `validators[].geo_sources`) and in
+`validator-index.json` (under `validators[].geo_sources`). Useful for
+drilling into "why did pool X's GDI change?" — the answer is usually
+"validator Y's `country` source flipped from stakewiz to maxmind
+because the IP changed".
+
+### Disagreement logging
+
+`mergeGeo()` accepts an optional `logger` argument. When passed, it
+emits a `geo.merge.disagreement` WARN log line for any dimension where
+two or more sources had non-null values that disagreed under the
+field-aware normalisation. The publish pipeline intentionally omits
+the logger to avoid drowning the journal in ~hundreds of warns per
+ingest cycle; for ad-hoc investigation, run `bin/geo-shadow-report.mjs`
+which surfaces aggregates instead.
+
 ## Force re-ingest the current epoch
 
 Ingest is idempotent per epoch: it bails on `storage.isEpochAlreadyIngested(epoch)`
