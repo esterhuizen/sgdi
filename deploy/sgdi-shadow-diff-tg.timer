@@ -1,0 +1,25 @@
+# /etc/systemd/system/sgdi-shadow-diff-tg.timer
+#
+# Fires sgdi-shadow-diff-tg.service once per day. Default schedule:
+# 19:00 UTC = 7:00 NZST / 8:00 NZDT — early in the operator's morning so
+# the daily shadow snapshot lands before the rest of the workday.
+#
+# Persistent=true so a missed run catches up on next boot.
+# RandomizedDelaySec=2min just so we're not exactly on the minute.
+#
+# Enable:    sudo systemctl daemon-reload && sudo systemctl enable --now sgdi-shadow-diff-tg.timer
+# Force run: sudo systemctl start sgdi-shadow-diff-tg.service
+# Inspect:   systemctl list-timers sgdi-shadow-diff-tg.timer
+# Logs:      journalctl -u sgdi-shadow-diff-tg.service -n 50
+
+[Unit]
+Description=Daily shadow-vs-canonical diff posted to Telegram
+
+[Timer]
+OnCalendar=*-*-* 19:00:00 UTC
+RandomizedDelaySec=2min
+Persistent=true
+Unit=sgdi-shadow-diff-tg.service
+
+[Install]
+WantedBy=timers.target

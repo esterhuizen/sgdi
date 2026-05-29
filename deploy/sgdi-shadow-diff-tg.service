@@ -1,0 +1,45 @@
+# /etc/systemd/system/sgdi-shadow-diff-tg.service
+#
+# Oneshot — runs scripts/post-shadow-diff-to-tg.ts. Calls the diff CLI,
+# formats the JSON output into a compact Telegram message, and posts it
+# to the SGDI ops chat. Triggered daily by sgdi-shadow-diff-tg.timer.
+#
+# Part of the MaxMind shadow-geoip rollout: passive monitoring during the
+# ≥2-week shadow window so the operator can spot stability or sudden
+# shocks without having to log in and run the diff CLI by hand.
+#
+# Read-only — touches no DB, no shadow files; only reads two JSON files
+# per tree and POSTs to Telegram. Safe to run any time; safe to disable.
+
+[Unit]
+Description=Daily Telegram summary of canonical vs shadow GDI diff
+Documentation=file:///var/www/sgdi/current/scripts/post-shadow-diff-to-tg.ts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=definity
+Group=definity
+WorkingDirectory=/var/www/sgdi/current
+
+# Defaults match production; override in /etc/default/sgdi.env if needed.
+Environment=SGDI_PUBLISHED_DIR=/var/lib/sgdi/published
+Environment=SGDI_SHADOW_PUBLISHED_DIR=/var/lib/sgdi/published-shadow
+Environment=SGDI_SHADOW_DIFF_TOP=3
+
+# Telegram bot creds live in the shared sgdi env file (mode 640 root:definity).
+EnvironmentFile=-/etc/default/sgdi.env
+
+ExecStart=/usr/bin/node --experimental-strip-types scripts/post-shadow-diff-to-tg.ts
+TimeoutStartSec=60
+
+# Hardening — same template as gdi-watchdog. Only outbound network needed
+# (Telegram API). No DB writes, no published-dir writes.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
