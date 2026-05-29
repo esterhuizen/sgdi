@@ -101,6 +101,73 @@ const EQ_FN: Record<'country' | 'city' | 'asn' | 'asn_name', (a: string, b: stri
 const isPresent = (v: string | null | undefined): v is string =>
   typeof v === 'string' && v.trim().length > 0;
 
+// ── Canonical output format ──────────────────────────────────────────────
+// After picking the winner per dimension we coerce the raw string into a
+// single canonical format so that:
+//
+//   (a) The published UI strings ("Netherlands" vs "NL", "AS24940" vs "24940")
+//       don't change across the MaxMind cutover. Pre-MaxMind, the canonical
+//       pipeline emitted Stakewiz strings — full country names and AS-prefixed
+//       ASNs. Post-MaxMind we want the same look and feel.
+//
+//   (b) Bucket counts for network share calculations are computed over the
+//       SAME string regardless of which source provided it. Without this
+//       step, a Netherlands validator whose geo came from MaxMind ("NL")
+//       would land in a different bucket than one whose geo came from
+//       Stakewiz ("Netherlands") — splitting the share and inflating the
+//       network GDI. Normalising before the score computation closes that.
+//
+// The choice of "display-name country + AS-prefixed ASN" is chosen to match
+// the legacy Stakewiz format so all downstream tooling (UI, auto-poster,
+// social cards, OG images) sees the same strings it did before.
+
+const countryDisplayNames = (() => {
+  try { return new Intl.DisplayNames(['en'], { type: 'region' }); }
+  catch { return null; }
+})();
+
+// Intl.DisplayNames returns the formal UN region name for some ISO-2 codes,
+// which doesn't match the everyday English name most users (and the legacy
+// Stakewiz UI strings) expect. Override the handful where the UN form is
+// worse UX than the common form. Keep this list small — it's an exception
+// list, not a translation table.
+const COUNTRY_NAME_OVERRIDES: Record<string, string> = {
+  'Hong Kong SAR China': 'Hong Kong',
+  'Macao SAR China':     'Macao',
+};
+
+/** "NL" → "Netherlands", "United States" → "United States", "" → null. */
+function canonicalCountry(s: string | null): string | null {
+  if (!isPresent(s)) return null;
+  const t = s.trim();
+  let expanded = t;
+  if (t.length === 2 && countryDisplayNames != null) {
+    const e = countryDisplayNames.of(t.toUpperCase());
+    if (e && e !== t.toUpperCase()) expanded = e;
+  }
+  return COUNTRY_NAME_OVERRIDES[expanded] ?? expanded;
+}
+
+/** "24940" → "AS24940", "AS24940" → "AS24940", "as0" → "AS0", "" → null. */
+function canonicalAsn(s: string | null): string | null {
+  if (!isPresent(s)) return null;
+  const stripped = s.trim().replace(/^AS/i, '');
+  if (stripped.length === 0) return null;
+  return `AS${stripped}`;
+}
+
+/** City + asn_name pass through unchanged — no single canonical format. */
+function canonicalPassthrough(s: string | null): string | null {
+  return isPresent(s) ? s.trim() : null;
+}
+
+const CANONICALIZE: Record<'country' | 'city' | 'asn' | 'asn_name', (s: string | null) => string | null> = {
+  country: canonicalCountry,
+  city: canonicalPassthrough,
+  asn: canonicalAsn,
+  asn_name: canonicalPassthrough,
+};
+
 /**
  * Resolve one dimension. Walks the candidate list in priority order, picks
  * the first non-null value, records its source. Optionally logs WARN if
@@ -173,11 +240,13 @@ export function mergeGeo(input: MergeGeoInput): MergedGeo {
   const asn      = pickDimension('asn',      candidates('asn'),      input.pubkey, input.logger);
   const asn_name = pickDimension('asn_name', candidates('asn_name'), input.pubkey, input.logger);
 
+  // Coerce the raw winners into the canonical output format. See the
+  // CANONICALIZE block above for the rationale.
   return {
-    country: country.value,
-    city: city.value,
-    asn: asn.value,
-    asn_name: asn_name.value,
+    country: CANONICALIZE.country(country.value),
+    city: CANONICALIZE.city(city.value),
+    asn: CANONICALIZE.asn(asn.value),
+    asn_name: CANONICALIZE.asn_name(asn_name.value),
     sources: {
       country: country.source,
       city: city.source,
