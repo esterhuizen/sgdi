@@ -105,6 +105,34 @@ Prod (`gdindex.app`) is **not** wired to the shadow tree — its nginx
 config still aliases `/var/lib/sgdi/published/` and `sgdi.service` reads
 the same canonical dir.
 
+#### Comparing canonical vs shadow
+
+Two read-only CLIs surface the rollout's progress:
+
+- `bin/geo-shadow-report` — input-side agreement: for each active
+  validator, did the MaxMind shadow lookup match the canonical Stakewiz
+  row? Reads `validator_geo_shadow` rows from `gdi.db`.
+
+- `bin/geo-shadow-diff` — output-side diff: takes the published trees
+  and shows the actual scoring impact (network GDI delta, pool rank
+  churn, validator rank movers, source-mix by stake share). Reads
+  `leaderboard-latest.json` + `validator-index.json` from both dirs.
+  Use this to decide when shadow is stable enough to promote.
+
+  ```sh
+  bin/geo-shadow-diff.mjs              # human-readable, top 10 movers
+  bin/geo-shadow-diff.mjs --top 20
+  bin/geo-shadow-diff.mjs --json       # for piping to TG summary
+  ```
+
+  Country-name format and AS-prefix differences are surfaced as
+  "raw" vs "real (normalised)" counts — a "real" change means MaxMind
+  and Stakewiz actually disagreed on the country / city / asn after
+  ISO-2-to-name expansion and AS-prefix stripping. Cosmetic-only diffs
+  ("Netherlands" vs "NL", "AS24940" vs "24940") still affect bucketing
+  and will need a single canonical format at promotion time — that's
+  the next PR.
+
 Note: the prod `gdi-ingest.service` runs from
 `/var/www/sgdi/current/scripts/gdi-ingest.ts` — staging deploys do
 NOT change which ingest code runs. To test ingest changes, the prod
