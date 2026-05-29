@@ -50,6 +50,13 @@ rm -rf ".next/standalone/public" ".next/standalone/.next/static"
 ln -s ../../public ".next/standalone/public"
 ln -s ../../static ".next/standalone/.next/static"
 
+# Drop build-time prerendered HTMLs. The build runs without access to
+# /var/lib/sgdi/published/, so loadJson returns null and Next bakes the
+# "Awaiting first ingest" empty state into every ISR page. Deleting
+# them forces fresh SSR on first request, which then writes a real one
+# back into the cache.
+find ".next/standalone/.next/server/app" -maxdepth 3 -name "*.html" -delete
+
 # Atomic symlink swap
 ln -sfn "$RELEASE" "$APP_ROOT/current.new"
 mv -Tf "$APP_ROOT/current.new" "$APP_ROOT/current"
