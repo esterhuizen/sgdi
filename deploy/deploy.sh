@@ -64,6 +64,20 @@ mv -Tf "$APP_ROOT/current.new" "$APP_ROOT/current"
 echo "==> Reloading service: $SERVICE"
 sudo systemctl restart "$SERVICE"
 
+# Purge Cloudflare cache so users see the new build immediately rather
+# than waiting up to 4h for the max-age TTL to expire. Sources the env
+# file via sudo cat (definity has read access via group). Failure is
+# logged but doesn't fail the deploy — the worst case is users see
+# stale content for a few minutes, which is fine.
+if [[ -r "$RELEASE/scripts/purge-cloudflare.mjs" ]]; then
+    echo "==> Purging Cloudflare cache"
+    if sudo bash -c "set -a; source /etc/default/sgdi.env; set +a; node $RELEASE/scripts/purge-cloudflare.mjs"; then
+        :
+    else
+        echo "    (purge failed — cache will expire naturally within max-age)"
+    fi
+fi
+
 # Prune old releases
 cd "$APP_ROOT/releases"
 ls -1tr | head -n -"$KEEP_RELEASES" | xargs -r rm -rf
