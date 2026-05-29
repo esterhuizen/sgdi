@@ -188,6 +188,57 @@ CREATE TABLE IF NOT EXISTS validator_geo_overrides (
   added_by         TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_overrides_added_at ON validator_geo_overrides(added_at);
+
+-- Parallel scoring tables for the MaxMind-driven shadow pipeline.
+-- These mirror pool_scores / network_baseline / network_shares EXACTLY,
+-- just populated from a different geo source mix: override > maxmind >
+-- stakewiz > validators-app, per dimension. The canonical pipeline is
+-- unchanged; the shadow pipeline writes here so we can render and compare
+-- both worlds side-by-side without touching live production scoring.
+--
+-- Schema is intentionally identical to the canonical tables so the same
+-- scoring.ts functions populate either one with no per-column drift.
+-- When we promote MaxMind to canonical, these tables retire cleanly.
+CREATE TABLE IF NOT EXISTS pool_scores_shadow (
+  epoch                  INTEGER NOT NULL,
+  pool_address           TEXT    NOT NULL,
+  dc_country             REAL,
+  dc_city                REAL,
+  dc_asn                 REAL,
+  gdi_composite          REAL,
+  network_impact_score   REAL,
+  placement_coverage     REAL,
+  validator_count        INTEGER,
+  total_stake_lamports   INTEGER,
+  computed_at            INTEGER NOT NULL,
+  methodology_version    TEXT    NOT NULL,
+  PRIMARY KEY (epoch, pool_address)
+);
+CREATE INDEX IF NOT EXISTS idx_pool_scores_shadow_pool ON pool_scores_shadow(pool_address, epoch DESC);
+
+CREATE TABLE IF NOT EXISTS network_baseline_shadow (
+  epoch                INTEGER PRIMARY KEY,
+  dc_country           REAL,
+  dc_city              REAL,
+  dc_asn               REAL,
+  gdi_composite        REAL,
+  validator_count      INTEGER,
+  total_stake_lamports INTEGER,
+  computed_at          INTEGER NOT NULL,
+  methodology_version  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS network_shares_shadow (
+  epoch           INTEGER NOT NULL,
+  dimension       TEXT    NOT NULL,
+  bucket          TEXT    NOT NULL,
+  share           REAL    NOT NULL,
+  validator_count INTEGER NOT NULL,
+  computed_at     INTEGER NOT NULL,
+  PRIMARY KEY (epoch, dimension, bucket)
+);
+CREATE INDEX IF NOT EXISTS idx_network_shares_shadow_epoch ON network_shares_shadow(epoch);
+CREATE INDEX IF NOT EXISTS idx_network_shares_shadow_dim_bucket ON network_shares_shadow(dimension, bucket);
 `;
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -560,6 +611,78 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
       `SELECT * FROM network_shares WHERE dimension = ? AND bucket = ? ORDER BY epoch DESC`,
     ),
 
+    // ── Shadow scoring (parallel pool_scores / network_baseline /
+    //    network_shares for the MaxMind-driven pipeline). Statements
+    //    mirror their canonical counterparts EXACTLY; only the table
+    //    names differ. Centralised here so any tweak to the canonical
+    //    upsert shape has an obvious matching change here too.
+    upsertPoolScoreShadow: db.prepare(`
+      INSERT INTO pool_scores_shadow
+        (epoch, pool_address, dc_country, dc_city, dc_asn, gdi_composite,
+         network_impact_score, placement_coverage, validator_count,
+         total_stake_lamports, computed_at, methodology_version)
+      VALUES
+        (@epoch, @pool_address, @dc_country, @dc_city, @dc_asn, @gdi_composite,
+         @network_impact_score, @placement_coverage, @validator_count,
+         @total_stake_lamports, @computed_at, @methodology_version)
+      ON CONFLICT(epoch, pool_address) DO UPDATE SET
+        dc_country           = excluded.dc_country,
+        dc_city              = excluded.dc_city,
+        dc_asn               = excluded.dc_asn,
+        gdi_composite        = excluded.gdi_composite,
+        network_impact_score = excluded.network_impact_score,
+        placement_coverage   = excluded.placement_coverage,
+        validator_count      = excluded.validator_count,
+        total_stake_lamports = excluded.total_stake_lamports,
+        computed_at          = excluded.computed_at,
+        methodology_version  = excluded.methodology_version
+    `),
+    listShadowScoresForEpoch: db.prepare(`
+      SELECT * FROM pool_scores_shadow WHERE epoch = ? ORDER BY gdi_composite DESC
+    `),
+    listShadowScoresForPool: db.prepare(`
+      SELECT * FROM pool_scores_shadow WHERE pool_address = ? ORDER BY epoch DESC
+    `),
+
+    upsertNetworkBaselineShadow: db.prepare(`
+      INSERT INTO network_baseline_shadow
+        (epoch, dc_country, dc_city, dc_asn, gdi_composite, validator_count, total_stake_lamports,
+         computed_at, methodology_version)
+      VALUES
+        (@epoch, @dc_country, @dc_city, @dc_asn, @gdi_composite, @validator_count, @total_stake_lamports,
+         @computed_at, @methodology_version)
+      ON CONFLICT(epoch) DO UPDATE SET
+        dc_country           = excluded.dc_country,
+        dc_city              = excluded.dc_city,
+        dc_asn               = excluded.dc_asn,
+        gdi_composite        = excluded.gdi_composite,
+        validator_count      = excluded.validator_count,
+        total_stake_lamports = excluded.total_stake_lamports,
+        computed_at          = excluded.computed_at,
+        methodology_version  = excluded.methodology_version
+    `),
+    listShadowBaselines: db.prepare(
+      `SELECT * FROM network_baseline_shadow ORDER BY epoch DESC`,
+    ),
+
+    upsertNetworkShareShadow: db.prepare(`
+      INSERT INTO network_shares_shadow (epoch, dimension, bucket, share, validator_count, computed_at)
+      VALUES (@epoch, @dimension, @bucket, @share, @validator_count, @computed_at)
+      ON CONFLICT(epoch, dimension, bucket) DO UPDATE SET
+        share           = excluded.share,
+        validator_count = excluded.validator_count,
+        computed_at     = excluded.computed_at
+    `),
+    deleteNetworkSharesShadowForEpoch: db.prepare(
+      `DELETE FROM network_shares_shadow WHERE epoch = ?`,
+    ),
+    listNetworkSharesShadowForEpoch: db.prepare(
+      `SELECT * FROM network_shares_shadow WHERE epoch = ? ORDER BY dimension, share DESC`,
+    ),
+    listNetworkSharesShadowForBucket: db.prepare(
+      `SELECT * FROM network_shares_shadow WHERE dimension = ? AND bucket = ? ORDER BY epoch DESC`,
+    ),
+
     upsertValidatorGeoShadow: db.prepare(`
       INSERT INTO validator_geo_shadow (
         epoch, validator_pubkey, ip_used,
@@ -785,6 +908,58 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     },
     listNetworkSharesForBucket(dimension: 'country' | 'city' | 'asn', bucket: string): NetworkShareRow[] {
       return stmt.listNetworkSharesForBucket.all(dimension, bucket) as NetworkShareRow[];
+    },
+
+    // ─── Shadow scoring (parallel pool_scores / network_baseline /
+    //     network_shares for the MaxMind-driven pipeline). Same
+    //     row types as canonical — the schema is identical by design.
+    upsertPoolScoreShadow(row: PoolScore): void {
+      stmt.upsertPoolScoreShadow.run(row);
+    },
+    listShadowScoresForEpoch(epoch: number): PoolScore[] {
+      return stmt.listShadowScoresForEpoch.all(epoch) as PoolScore[];
+    },
+    listShadowScoresForPool(poolAddress: string): PoolScore[] {
+      return stmt.listShadowScoresForPool.all(poolAddress) as PoolScore[];
+    },
+
+    upsertNetworkBaselineShadow(row: NetworkBaseline): void {
+      stmt.upsertNetworkBaselineShadow.run(row);
+    },
+    listShadowBaselines(): NetworkBaseline[] {
+      return stmt.listShadowBaselines.all() as NetworkBaseline[];
+    },
+
+    /**
+     * Bulk-write a full per-epoch shadow network_shares snapshot. Wrapped
+     * in a transaction so a partial write can't leave half-populated rows.
+     * Mirrors `replaceNetworkSharesForEpoch` for the canonical table.
+     */
+    replaceNetworkSharesShadowForEpoch(
+      epoch: number,
+      rows: { dimension: 'country' | 'city' | 'asn'; bucket: string; share: number; validator_count: number }[],
+      computedAt: number,
+    ): void {
+      const tx = db.transaction(() => {
+        stmt.deleteNetworkSharesShadowForEpoch.run(epoch);
+        for (const r of rows) {
+          stmt.upsertNetworkShareShadow.run({
+            epoch,
+            dimension: r.dimension,
+            bucket: r.bucket,
+            share: r.share,
+            validator_count: r.validator_count,
+            computed_at: computedAt,
+          });
+        }
+      });
+      tx();
+    },
+    listNetworkSharesShadowForEpoch(epoch: number): NetworkShareRow[] {
+      return stmt.listNetworkSharesShadowForEpoch.all(epoch) as NetworkShareRow[];
+    },
+    listNetworkSharesShadowForBucket(dimension: 'country' | 'city' | 'asn', bucket: string): NetworkShareRow[] {
+      return stmt.listNetworkSharesShadowForBucket.all(dimension, bucket) as NetworkShareRow[];
     },
 
     /**
