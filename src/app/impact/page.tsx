@@ -35,6 +35,29 @@ export const metadata: Metadata = {
 
 const FIRST_EPOCH = 969;
 
+// Temporary exclusion: at epoch 978 the shadow build's canonical geo
+// backend (override > MaxMind > Stakewiz) corrected some long-standing
+// country/city/ASN misclassifications for a handful of pools. The result
+// was step-changes in their pool-level GDI big enough to dominate the
+// chart's y-axis on the shadow staging site and warp the visual story
+// of every other pool's trajectory. These pools are excluded from the
+// top-15 trajectory chart **only on the shadow build** (gated by the
+// SGDI_FALLBACK_PUBLISHED_DIR env var that staging sets) until the
+// shadow window closes around epoch 987 — by then the 969-977 canonical
+// history rolls off the left edge naturally and the discontinuity is
+// no longer in frame.
+//
+// Prod (no fallback env set) is unaffected: canonical data is stable
+// across 969-978, so the chart renders fine with all 15 pools.
+//
+// REMOVE THIS LIST + the gating check below when the chart's leftmost
+// displayed epoch crosses 978.
+const TEMP_EXCLUDED_POOLS_UNTIL_EPOCH_987 = new Set<string>([
+  'HQLwnQJFH7t9nBTP4vbdW4eHy62aecfDnj8te8VzqkFL', // BdMLRsol  — GDI ~1.79 → 3.42
+  'spp1mo6shdcrRyqDK2zdurJ8H5uttZE6H6oVjHxN1QN', // xSHIN     — GDI ~2.56 → 3.04
+]);
+const SHADOW_BUILD = process.env.SGDI_FALLBACK_PUBLISHED_DIR != null;
+
 // Publication milestones — vertical markers on the trajectory chart for
 // temporal context. No editorial framing — these are dates, not claims.
 const MILESTONES: { epoch: number; label: string }[] = [
@@ -80,8 +103,11 @@ export default async function ImpactPage() {
   for (const e of epochs) leaderboards[e] = await loadLeaderboardForEpoch(e);
 
   // Latest top-15 pools (filtered to >= 100k SOL, the standard TVL floor).
+  // On the shadow build only, also drops the temporarily-excluded pools —
+  // see comment on TEMP_EXCLUDED_POOLS_UNTIL_EPOCH_987 above.
   const top15 = (latest.pools ?? [])
     .filter((p) => p.gdi != null && (p.total_stake_sol ?? 0) >= 100_000)
+    .filter((p) => !(SHADOW_BUILD && TEMP_EXCLUDED_POOLS_UNTIL_EPOCH_987.has(p.pool_address)))
     .sort((a, b) => (b.gdi ?? 0) - (a.gdi ?? 0))
     .slice(0, 15);
 
