@@ -225,6 +225,13 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
 
   let poolsScored = 0;
   const shadowPoolScores: PoolScore[] = [];
+  // Collected in the scoring loop, written AFTER ranking is known so each
+  // pool's latest.json carries rank/total_ranked (matching Pass A).
+  const perPoolData: Array<{
+    pool: (typeof pools)[number];
+    scoreRow: PoolScore;
+    validatorsInline: unknown[];
+  }> = [];
   for (const pool of pools) {
     const snaps = storage.listSnapshotsForPoolEpoch(latestEpoch, pool.pool_address);
     if (snaps.length === 0) continue;
@@ -325,18 +332,8 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
         r.g = ((r.r_country / dcCViz) + (r.r_city / dcCityViz) + (r.r_asn / dcAViz)) / 3;
       }
     }
-    await atomicWriteJson(join(shadowOutputDir, 'pools', pool.pool_address, 'latest.json'), {
-      pool: {
-        address: pool.pool_address,
-        name: pool.pool_name,
-        program: pool.pool_program,
-        token_mint: pool.pool_token_mint,
-      },
-      score: formatPoolScore(scoreRow),
-      network_baseline: formatBaseline(shadowBaselineRow),
-      client_distribution: clientDistByPool.get(pool.pool_address) ?? null,
-      validators: validatorsInline,
-    });
+    // Defer the latest.json write until ranks are known (after the loop).
+    perPoolData.push({ pool, scoreRow, validatorsInline });
 
     // Stitch canonical pre-shadow scores into the shadow history.json for
     // this pool. Same rationale as the network-baseline merge above: shadow
@@ -357,6 +354,34 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
       },
       methodology_version: METHODOLOGY_VERSION,
       history: mergedHistory.map(formatPoolScore),
+    });
+  }
+
+  // ── Rank pools, then write per-pool latest.json ──
+  // Single source of truth for ranking (reused by the leaderboard below).
+  // Inclusion + order mirror Pass A: real GDI, ≥1 validator, GDI desc.
+  const scoredLeaderboard = shadowPoolScores
+    .filter((s) => s.gdi_composite != null && (s.validator_count ?? 0) >= 1)
+    .sort((a, b) => (b.gdi_composite ?? 0) - (a.gdi_composite ?? 0));
+  const rankByAddress = new Map(scoredLeaderboard.map((s, i) => [s.pool_address, i + 1]));
+  const totalRanked = scoredLeaderboard.length;
+
+  for (const { pool, scoreRow, validatorsInline } of perPoolData) {
+    await atomicWriteJson(join(shadowOutputDir, 'pools', pool.pool_address, 'latest.json'), {
+      pool: {
+        address: pool.pool_address,
+        name: pool.pool_name,
+        program: pool.pool_program,
+        token_mint: pool.pool_token_mint,
+      },
+      score: formatPoolScore(scoreRow),
+      network_baseline: formatBaseline(shadowBaselineRow),
+      // Leaderboard rank (1-indexed) + total ranked pools — Pass A parity;
+      // the pool detail page rank badge + pool OG card read these.
+      rank: rankByAddress.get(pool.pool_address) ?? null,
+      total_ranked: totalRanked,
+      client_distribution: clientDistByPool.get(pool.pool_address) ?? null,
+      validators: validatorsInline,
     });
   }
 
@@ -512,10 +537,8 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
   });
 
   // ── Shadow leaderboard ──
-  // Rank by shadow GDI desc. Mirrors Pass A's inclusion rule (real GDI, ≥1 validator).
-  const scoredLeaderboard = shadowPoolScores
-    .filter((s) => s.gdi_composite != null && (s.validator_count ?? 0) >= 1)
-    .sort((a, b) => (b.gdi_composite ?? 0) - (a.gdi_composite ?? 0));
+  // Reuses `scoredLeaderboard` computed above (same ranking the per-pool
+  // latest.json files were stamped with).
   const poolMetaByAddr = new Map(pools.map((p) => [p.pool_address, p]));
   const leaderboard = {
     epoch: latestEpoch,
