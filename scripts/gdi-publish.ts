@@ -318,11 +318,20 @@ async function main() {
   // it. Consumers (e.g. the auto-poster) get a stable "start-of-epoch" view
   // that's independent of intra-epoch ingest re-runs.
   const perEpochPath = join(OUTPUT_DIR, `leaderboard-${latestEpoch}.json`);
-  if (!existsSync(perEpochPath)) {
+  // When the merged (Pass B) publish writes into this SAME OUTPUT_DIR — the
+  // post-consolidation config — Pass B owns the per-epoch frozen file (merged
+  // geo, write-once). Pass A must NOT write a Stakewiz frozen file first, or
+  // Pass B's write-once check would see it exists and skip, leaving the frozen
+  // snapshot on stale Stakewiz geo. When the dirs differ (default / pre-
+  // consolidation) behaviour is unchanged. See the canonical consolidation.
+  const mergedOwnsGeo =
+    process.env.SGDI_SHADOW_ENABLED !== 'false' &&
+    resolve(process.env.SGDI_SHADOW_PUBLISHED_DIR || `${OUTPUT_DIR}-shadow`) === OUTPUT_DIR;
+  if (!mergedOwnsGeo && !existsSync(perEpochPath)) {
     await atomicWriteJson(perEpochPath, leaderboard);
     log.info('publish.epoch_snapshot_frozen', { epoch: latestEpoch, path: perEpochPath });
   } else {
-    log.debug('publish.epoch_snapshot_kept', { epoch: latestEpoch });
+    log.debug('publish.epoch_snapshot_kept', { epoch: latestEpoch, mergedOwnsGeo });
   }
 
   // 4. per-pool latest + history
