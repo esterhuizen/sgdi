@@ -69,45 +69,54 @@ sites read:
 For those: dry-run with a fixture JSON, OR deploy to staging+prod
 together knowing both sites flip atomically.
 
-#### Shadow geo mode (staging-only world)
+#### Merged geo pipeline (single published tree)
 
-Staging *can* render a parallel "shadow" world that's scored from
-MaxMind + operator-override geo while prod stays on Stakewiz/Validators.app.
-This was added as the safe rollout path for the MaxMind cutover.
+The published world is scored from MERGED geo (override > maxmind >
+stakewiz) — the same merge as [[the geo data sources section]] documents.
+This started life as a parallel "shadow" pipeline (the safe MaxMind
+rollout path) and was consolidated into the single canonical pipeline on
+**2026-05-30**. History, for anyone archaeologising the code:
 
-How it works: every successful ingest cycle runs a Pass B inside
-`scripts/gdi-publish.ts` (`runShadowPass`, in `scripts/gdi-publish-shadow.ts`)
-that re-merges per-validator geo, recomputes shadow scores into the
-`pool_scores_shadow` / `network_baseline_shadow` / `network_shares_shadow`
-tables, and writes a parallel published tree at `/var/lib/sgdi/published-shadow/`.
-Pass B writes `leaderboard-{epoch,latest}.json`, `network-baseline.json`,
-per-pool `pools/<addr>/latest.json`, `validator-index.json`, and
-`validators.json` — all geo-dependent files. Pass B failures don't affect
-canonical publish — they just log and bail.
+- **Rollout** (2026-05-29): a Pass B (`runShadowPass` in
+  `scripts/gdi-publish-shadow.ts`) computed merged scores into
+  `*_shadow` tables + a parallel `/var/lib/sgdi/published-shadow/` tree,
+  while Pass A kept emitting the Stakewiz world to `/var/lib/sgdi/published/`.
+  nginx + `sgdi.service` served `published-shadow/` with a fallthrough to
+  `published/` for the geo-independent files Pass B doesn't emit.
+- **Consolidation** (2026-05-30): Pass B now writes into
+  `/var/lib/sgdi/published/` directly (its merged files overwrite Pass A's
+  Stakewiz versions in place), driven by the
+  `gdi-ingest.service.d/consolidate.conf` drop-in
+  (`SGDI_SHADOW_PUBLISHED_DIR=/var/lib/sgdi/published`; template in
+  `deploy/`). The `mergedOwnsGeo` gate in `gdi-publish.ts` makes Pass A
+  defer the write-once frozen `leaderboard-<epoch>.json` to Pass B.
+  nginx + `sgdi.service` serve plain `published/` again — **no fallthrough,
+  no `published-shadow/`**.
 
-To point staging at the shadow world (current default):
+Current served files in `published/`: geo-dependent ones
+(`leaderboard-{epoch,latest}.json`, `network-baseline.json`,
+`validator-index.json`, `validators.json`, per-pool `latest.json` +
+`history.json` for the ~29 current-epoch-snapshot pools) come from Pass B
+(merged); geo-independent ones (`methodology.json`,
+`concentration-crosscheck.json`) from Pass A; `pool-fees-*.json` from the
+separate pool-fees timer. Pools tracked but without a current-epoch
+snapshot (~71) still get Pass-A Stakewiz detail pages — pre-existing,
+unchanged by the consolidation.
 
-- nginx on `test.gdindex.app` aliases `/gdi/` →
-  `/var/lib/sgdi/published-shadow/` and falls through to
-  `/var/lib/sgdi/published/` via a `@gdi_canonical` named location for any
-  file not in the shadow tree (methodology, pool-fees, historical
-  leaderboards, concentration-crosscheck — all geo-independent). See
-  `/etc/nginx/sites-available/gdindex-staging`.
-- `sgdi-staging.service` has a drop-in at
-  `/etc/systemd/system/sgdi-staging.service.d/shadow.conf` setting
-  `SGDI_PUBLISHED_DIR=/var/lib/sgdi/published-shadow` and
-  `SGDI_FALLBACK_PUBLISHED_DIR=/var/lib/sgdi/published` (template at
-  `deploy/sgdi-staging-shadow.conf` in this repo). The fallback env var is
-  what makes pages that iterate historical epochs (e.g. `/impact`) keep
-  rendering — `loadJson` in `src/lib/data.ts` tries the shadow dir first,
-  falls through to canonical for files Pass B doesn't produce.
+**Rollback net (kept until ~epoch 987):** the `*_shadow` tables still get
+written by Pass B each cycle, the frozen `published-shadow/` tree remains
+on disk, and `validator_geo_shadow` (raw maxmind + canonical snapshots)
+keeps flowing from ingest. To revert serving to the pre-consolidation
+shadow tree: remove `gdi-ingest.service.d/consolidate.conf`, restore the
+`sgdi.service` shadow drop-in + the nginx `@gdi_canonical` fallthrough.
 
-To toggle staging back to canonical: revert the nginx alias and remove
-the systemd drop-in, then `nginx -s reload && systemctl restart sgdi-staging`.
-
-Prod (`gdindex.app`) is **not** wired to the shadow tree — its nginx
-config still aliases `/var/lib/sgdi/published/` and `sgdi.service` reads
-the same canonical dir.
+**Deferred internal cleanup (separate follow-up, zero UI/data impact):**
+Pass A still computes Stakewiz scores (into the canonical `pool_scores` /
+`network_baseline` / `network_shares` tables) that are then unread/
+overwritten — a few seconds of wasted compute per cycle. Excising it
+cleanly means untangling shared state (`clientDistByPool`,
+`networkClientDistribution`, `allValidators`) that the surviving Pass A
+sections still use; left for a focused PR.
 
 #### Comparing canonical vs shadow
 
