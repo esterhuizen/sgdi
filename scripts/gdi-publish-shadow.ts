@@ -266,7 +266,18 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
     poolsScored++;
 
     // Per-pool latest.json — include merged geo + sources per validator so
-    // staging UI can render the provenance.
+    // the UI can render provenance, AND the per-validator gradient `g` the
+    // pool page's g-distribution chart needs. Mirrors Pass A's computation
+    // (gdi-publish.ts) exactly, but over MERGED geo + the merged active-set
+    // shares (shadowShares). Two passes: gather per-validator rarities, then
+    // the pool's stake-weighted dc_*_viz, then g per validator.
+    //   g = ((r_country/dc_country) + (r_city/dc_city) + (r_asn/dc_asn)) / 3
+    const RARITY_FLOOR = 1e-9;
+    const rarityFromShareViz = (share: number) =>
+      share > 0 ? -Math.log(share) : -Math.log(RARITY_FLOOR);
+    const rarityViz = (dim: 'country' | 'city' | 'asn', bucket: string | null): number | null =>
+      bucket ? rarityFromShareViz(shadowShares[dim].get(bucket) ?? 0) : null;
+
     const validatorsInline = snaps.map((s) => {
       const merged = mergedByPubkey.get(s.validator_pubkey) ?? null;
       const v = storage.getValidator(s.validator_pubkey);
@@ -284,8 +295,36 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
         is_jito: v?.is_jito == null ? null : v.is_jito === 1,
         is_dz:   v?.is_dz   == null ? null : v.is_dz   === 1,
         is_bam:  v?.is_bam  == null ? null : v.is_bam  === 1,
+        r_country: rarityViz('country', merged?.country ?? null),
+        r_city:    rarityViz('city',    merged?.city ?? null),
+        r_asn:     rarityViz('asn',     merged?.asn ?? null),
+        g: null as number | null, // filled below once pool dc_*_viz is known
       };
     });
+    // Pool's stake-weighted dc_* over placeable validators (this pool only) —
+    // intentionally the active-set viz rarities, matching Pass A's note that
+    // this can drift a few % from the official scorer's dc_*.
+    const dcViz = (rKey: 'r_country' | 'r_city' | 'r_asn'): number | null => {
+      let weighted = 0, placeable = 0;
+      for (const r of validatorsInline) {
+        const ri = r[rKey];
+        if (ri == null) continue;
+        weighted += r.stake_sol * ri;
+        placeable += r.stake_sol;
+      }
+      return placeable > 0 ? weighted / placeable : null;
+    };
+    const dcCViz = dcViz('r_country'), dcCityViz = dcViz('r_city'), dcAViz = dcViz('r_asn');
+    for (const r of validatorsInline) {
+      if (
+        r.r_country != null && r.r_city != null && r.r_asn != null &&
+        dcCViz   != null && dcCViz   > 0 &&
+        dcCityViz != null && dcCityViz > 0 &&
+        dcAViz   != null && dcAViz   > 0
+      ) {
+        r.g = ((r.r_country / dcCViz) + (r.r_city / dcCityViz) + (r.r_asn / dcAViz)) / 3;
+      }
+    }
     await atomicWriteJson(join(shadowOutputDir, 'pools', pool.pool_address, 'latest.json'), {
       pool: {
         address: pool.pool_address,
