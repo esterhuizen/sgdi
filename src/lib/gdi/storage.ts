@@ -494,9 +494,9 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         -- Text fields use NULLIF(...,'') so an EMPTY value from a source never
         -- overwrites a real stored one — only genuinely-new non-empty values
         -- win, else keep what we have. (A Stakewiz outage that returned empty
-        -- `name` for the whole active set wiped 600+ identity_names on
-        -- 2026-05-31 because plain COALESCE treats '' as a value. NULLIF fixes
-        -- that class of bug for every identity/geo text field.)
+        -- names for the whole active set wiped 600+ identity_names on
+        -- 2026-05-31 because plain COALESCE treats empty-string as a value.
+        -- NULLIF fixes that class of bug for every identity/geo text field.)
         identity_pubkey             = COALESCE(NULLIF(excluded.identity_pubkey, ''),  validators.identity_pubkey),
         identity_name               = COALESCE(NULLIF(excluded.identity_name, ''),    validators.identity_name),
         country                     = COALESCE(NULLIF(excluded.country, ''),          validators.country),
