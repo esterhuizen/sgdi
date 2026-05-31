@@ -491,16 +491,22 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
          @activated_stake_lamports, @delinquent, @image_url,
          @client_name, @client_version, @is_jito, @is_dz, @ibrl_score, @is_bam)
       ON CONFLICT(validator_pubkey) DO UPDATE SET
-        identity_pubkey             = COALESCE(excluded.identity_pubkey,             validators.identity_pubkey),
-        identity_name               = COALESCE(excluded.identity_name,               validators.identity_name),
-        country                     = COALESCE(excluded.country,                     validators.country),
-        city                        = COALESCE(excluded.city,                        validators.city),
-        asn                         = COALESCE(excluded.asn,                         validators.asn),
-        asn_name                    = COALESCE(excluded.asn_name,                    validators.asn_name),
-        datacenter                  = COALESCE(excluded.datacenter,                  validators.datacenter),
-        country_source              = COALESCE(excluded.country_source,              validators.country_source),
-        city_source                 = COALESCE(excluded.city_source,                 validators.city_source),
-        asn_source                  = COALESCE(excluded.asn_source,                  validators.asn_source),
+        -- Text fields use NULLIF(...,'') so an EMPTY value from a source never
+        -- overwrites a real stored one — only genuinely-new non-empty values
+        -- win, else keep what we have. (A Stakewiz outage that returned empty
+        -- `name` for the whole active set wiped 600+ identity_names on
+        -- 2026-05-31 because plain COALESCE treats '' as a value. NULLIF fixes
+        -- that class of bug for every identity/geo text field.)
+        identity_pubkey             = COALESCE(NULLIF(excluded.identity_pubkey, ''),  validators.identity_pubkey),
+        identity_name               = COALESCE(NULLIF(excluded.identity_name, ''),    validators.identity_name),
+        country                     = COALESCE(NULLIF(excluded.country, ''),          validators.country),
+        city                        = COALESCE(NULLIF(excluded.city, ''),             validators.city),
+        asn                         = COALESCE(NULLIF(excluded.asn, ''),              validators.asn),
+        asn_name                    = COALESCE(NULLIF(excluded.asn_name, ''),         validators.asn_name),
+        datacenter                  = COALESCE(NULLIF(excluded.datacenter, ''),       validators.datacenter),
+        country_source              = COALESCE(NULLIF(excluded.country_source, ''),   validators.country_source),
+        city_source                 = COALESCE(NULLIF(excluded.city_source, ''),      validators.city_source),
+        asn_source                  = COALESCE(NULLIF(excluded.asn_source, ''),       validators.asn_source),
         metadata_refreshed_at       = COALESCE(excluded.metadata_refreshed_at,       validators.metadata_refreshed_at),
         stakewiz_wiz_score          = COALESCE(excluded.stakewiz_wiz_score,          validators.stakewiz_wiz_score),
         stakewiz_city_concentration = COALESCE(excluded.stakewiz_city_concentration, validators.stakewiz_city_concentration),
@@ -508,11 +514,11 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         stakewiz_refreshed_at       = COALESCE(excluded.stakewiz_refreshed_at,       validators.stakewiz_refreshed_at),
         activated_stake_lamports    = COALESCE(excluded.activated_stake_lamports,    validators.activated_stake_lamports),
         delinquent                  = COALESCE(excluded.delinquent,                  validators.delinquent),
-        image_url                   = COALESCE(excluded.image_url,                   validators.image_url),
+        image_url                   = COALESCE(NULLIF(excluded.image_url, ''),        validators.image_url),
         -- Client fields: refresh on every ingest (clients change more often than
         -- geo). excluded.* wins outright so operator-attestation updates flow through.
-        client_name                 = COALESCE(excluded.client_name,                 validators.client_name),
-        client_version              = COALESCE(excluded.client_version,              validators.client_version),
+        client_name                 = COALESCE(NULLIF(excluded.client_name, ''),      validators.client_name),
+        client_version              = COALESCE(NULLIF(excluded.client_version, ''),   validators.client_version),
         is_jito                     = COALESCE(excluded.is_jito,                     validators.is_jito),
         is_dz                       = COALESCE(excluded.is_dz,                       validators.is_dz),
         ibrl_score                  = COALESCE(excluded.ibrl_score,                  validators.ibrl_score),
