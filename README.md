@@ -72,11 +72,12 @@ Full methodology, sources, limitations, and version history at [gdindex.app/meth
 ## Data sources
 
 - **Helius RPC** — pool → validator → stake mapping (current epoch)
-- **Stakewiz** — IP-derived validator country / city / ASN, activated stake, delinquency, `wiz_score`
+- **Validator geo (country / city / ASN)** — resolved `override > MaxMind > Stakewiz`; the source actually used for each field is published per-validator in `geo_sources`
+- **Stakewiz** — activated stake, delinquency, `wiz_score`, and the geo fallback
 - **Validators.app** — cross-reference + fallback for validator metadata
 - **Jupiter LST token list** — name resolution for LST mints (used at watchlist discovery only)
 
-Trust ordering: Stakewiz primary → Validators.app cross-reference → every disagreement logged.
+Trust ordering for geo: manual override → MaxMind → Stakewiz → Validators.app, every disagreement logged.
 
 ## Project layout
 
@@ -125,17 +126,31 @@ npm run dev                        # http://localhost:3000
 
 ## Reproducing a published score
 
-The index always captures the current Solana epoch, so the cleanest way to reproduce a published score is to run the pipeline yourself for the current epoch and compare against production:
+**The fast path (zero credentials).** Every input the score consumes is already in
+the published JSON — including each validator's country / city / ASN, tagged with
+its `geo_sources` provenance. So you can recompute every pool's GDI and confirm it
+matches production with no API keys, no MaxMind license, and no database:
 
 ```bash
 git clone https://github.com/esterhuizen/sgdi.git && cd sgdi
-npm install && cp .env.example .env && $EDITOR .env
-npm run ingest                       # snapshot the current epoch into your SQLite
-npm run publish                      # render to public/gdi/*.json
-sqlite3 var/sgdi.db "select pool_address, gdi_composite from pool_scores where epoch = (select max(epoch) from pool_scores)"
+npm install
+npm run verify        # recomputes every pool's GDI from gdindex.app's published JSON
 ```
 
-The numbers you compute should match the corresponding entries on production at the same epoch (compare against [gdindex.app/gdi/leaderboard-latest.json](https://gdindex.app/gdi/leaderboard-latest.json)). If they don't, please [file an issue](https://github.com/esterhuizen/sgdi/issues) — that's a methodology drift we want to catch.
+`npm run verify` imports the **exact** pure scoring functions the live pipeline
+uses ([`src/lib/gdi/scoring.ts`](./src/lib/gdi/scoring.ts)) — so there's no
+re-implementation drift; if any number had been hand-tuned for any pool, the check
+would fail. It also cross-checks every per-validator rarity and the network
+baseline. Output ends with `PASS — N pools, 0 GDI mismatches`.
+
+**The deeper path (audit the inputs).** To independently re-derive the inputs
+themselves — stake from any Solana RPC, geo from Stakewiz / MaxMind — see
+[`docs/REPRODUCING.md`](./docs/REPRODUCING.md), which walks through both levels and
+the one input (MaxMind) that needs your own license.
+
+If your recomputed numbers ever diverge from production, please
+[file an issue](https://github.com/esterhuizen/sgdi/issues) — that's a methodology
+drift we want to catch.
 
 ## Scenario / optimisation CLI
 
