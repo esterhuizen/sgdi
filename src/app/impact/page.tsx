@@ -53,7 +53,7 @@ const MILESTONES: { epoch: number; label: string }[] = [
 // Pool addresses referenced in the case-study section.
 const ADDR = {
   definity: 'Bvbu55B991evqqhLtKcyTZjzQ4EQzRUwtf9T4CcpMmPL',
-  solblaze: 'stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi',
+  jpool:    'CtMyWsrUtAwXWiGr9WjHT5fC3p3fgV8cyGpLTo2LJzG1',
   stkesol:  'StKeDUdSu7jMSnPJ1MPqDnk3RdEwD2QbJaisHMebGhw',
 };
 
@@ -455,19 +455,19 @@ export default async function ImpactPage() {
             );
           })()}
 
-          {/* Card 2: SolBlaze — single-window improvement */}
+          {/* Card 2: JPool — best-performing large pool */}
           {(() => {
-            const s = series.find((x) => x.address === ADDR.solblaze);
+            const s = series.find((x) => x.address === ADDR.jpool);
             if (!s) return null;
             return (
               <div className="surface p-6">
-                <div className="text-xs uppercase tracking-wider text-ink-dim">Largest single move</div>
+                <div className="text-xs uppercase tracking-wider text-ink-dim">Large-pool standout</div>
                 <Link href={`/pools/${s.address}`} className="mt-2 block font-display text-2xl font-semibold text-ink hover:text-ink">
-                  bSOL · SolBlaze
+                  jSOL · JPool
                 </Link>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider text-ink-dim">Δ since launch</div>
+                    <div className="text-[10px] uppercase tracking-wider text-ink-dim">Δ over window</div>
                     <div className="num mt-1 font-display text-2xl font-semibold text-success tabular-nums">{fmt.pct(s.delta)}</div>
                   </div>
                   <div>
@@ -476,10 +476,10 @@ export default async function ImpactPage() {
                   </div>
                 </div>
                 <p className="mt-4 text-sm leading-relaxed text-ink-muted">
-                  bSOL moved from {fmt.num(s.firstGdi, 2)} to {fmt.num(s.gdiNow, 2)} —
-                  the largest single-pool improvement in the window, on a 1M-SOL pool.
-                  At this scale, every basis-point of GDI lift represents meaningful
-                  stake redistribution toward rarer locations.
+                  jSOL climbed from {fmt.num(s.firstGdi, 2)} to {fmt.num(s.gdiNow, 2)}, a {fmt.pct(s.delta)} GDI
+                  gain — one of the strongest improvements among the large pools over this window. On a{' '}
+                  {fmt.sol(s.tvlSol)}-SOL pool, a move that size means a real amount of stake migrating toward
+                  rarer countries, cities, and ASNs.
                 </p>
               </div>
             );
