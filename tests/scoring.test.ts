@@ -380,3 +380,63 @@ test('rollingMean: takes last N values', () => {
   near(rollingMean([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5), 8);
   near(rollingMean([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 10), 5.5);
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// gdi-1.1.1: pool members absent from the network denominator
+// (regression for the 2026-06-10 incident: a transiently-delinquent 13.4M-SOL
+// validator emptied its ASN bucket and the floor rarity inflated BNSOL +106%)
+// ───────────────────────────────────────────────────────────────────────────
+
+test('decentralisationContribution: member bucket absent from shares is excluded, not floored', () => {
+  const rows: PoolStakeRow[] = [
+    { pubkey: 'a', stakeLamports: 1_000n },
+    { pubkey: 'b', stakeLamports: 9_000n }, // delinquent member: bucket not in shares
+  ];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['a', { pubkey: 'a', country: 'X', city: null, asn: null, wizScore: null }],
+    ['b', { pubkey: 'b', country: 'GONE', city: null, asn: null, wizScore: null }],
+  ]);
+  const shares = new Map([['X', 0.25]]);
+  // Only 'a' is placeable. Under pre-1.1.1 behaviour 'b' would contribute
+  // 0.9 × -ln(1e-9) ≈ 18.6 and dominate; now DC is exactly a's rarity.
+  near(
+    decentralisationContribution(rows, meta, shares, (m) => m?.country ?? null),
+    -Math.log(0.25),
+  );
+});
+
+test('decentralisationContribution: every member bucket absent → NaN (no data)', () => {
+  const rows: PoolStakeRow[] = [{ pubkey: 'a', stakeLamports: 1_000n }];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['a', { pubkey: 'a', country: 'GONE', city: null, asn: null, wizScore: null }],
+  ]);
+  const shares = new Map([['X', 1]]);
+  assert.ok(
+    Number.isNaN(decentralisationContribution(rows, meta, shares, (m) => m?.country ?? null)),
+  );
+});
+
+test('computePoolScores: placementCoverage reflects members missing from the denominator', () => {
+  const rows: PoolStakeRow[] = [
+    { pubkey: 'a', stakeLamports: 1_000n },
+    { pubkey: 'b', stakeLamports: 9_000n }, // delinquent member
+  ];
+  const meta = new Map<string, ValidatorMetadata>([
+    ['a', { pubkey: 'a', country: 'X', city: 'XC', asn: 'XA', wizScore: 50 }],
+    ['b', { pubkey: 'b', country: 'G', city: 'GC', asn: 'GA', wizScore: 50 }],
+  ]);
+  const shares: NetworkShares = {
+    country: new Map([['X', 0.25]]),
+    city: new Map([['XC', 0.1]]),
+    asn: new Map([['XA', 0.5]]),
+  };
+  const result = computePoolScores(rows, meta, shares);
+  // b has full geo but none of its buckets exist in the denominator → only
+  // a's 1,000 of 10,000 lamports is placeable.
+  near(result.placementCoverage, 0.1);
+  // GDI computed from a alone: geomean of a's three rarities.
+  near(
+    result.gdi,
+    geometricMean3(-Math.log(0.25), -Math.log(0.1), -Math.log(0.5)),
+  );
+});

@@ -456,7 +456,7 @@ export default function MethodologyPage() {
               <td className="py-2 pr-4">Initial methodology.</td>
               <td className="py-2">Network shares computed over { '{ stake > 0 }' } (~1,929 records).</td>
             </tr>
-            <tr>
+            <tr className="border-b border-ring">
               <td className="py-2 pr-4 font-mono font-medium text-ink">gdi-1.1.0</td>
               <td className="py-2 pr-4">
                 Tightened the network denominator to actively-voting
@@ -465,6 +465,20 @@ export default function MethodologyPage() {
               <td className="py-2">
                 Smaller denominator (~760 instead of ~1,929) lifts rarity
                 values uniformly; pool GDI rankings shift only slightly.
+              </td>
+            </tr>
+            <tr>
+              <td className="py-2 pr-4 font-mono font-medium text-ink">gdi-1.1.1</td>
+              <td className="py-2 pr-4">
+                Pool members absent from the active-set denominator (e.g.
+                delinquent validators) are excluded from DC as non-placeable,
+                instead of receiving a floor rarity of −ln(10⁻⁹) ≈ 20.7.
+              </td>
+              <td className="py-2">
+                Delinquent stake can no longer inflate a pool&apos;s GDI (a
+                transient delinquency flag briefly inflated one pool by +106%
+                on 2026-06-10). Affected stake now shows up as reduced
+                placement coverage rather than as score.
               </td>
             </tr>
           </tbody>
