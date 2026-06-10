@@ -565,6 +565,94 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
   };
   await atomicWriteJson(join(shadowOutputDir, 'leaderboard-latest.json'), leaderboard);
 
+  // ── Geo-moves artifact ──
+  // Country-level relocation diff between the previous epoch's geo snapshot
+  // and this one. Published as a public artifact so downstream consumers (the
+  // auto-poster's per-epoch "validators moved to rarer places" post, future
+  // UI panels) read verifiable JSON instead of querying the DB. ip_changed
+  // distinguishes real relocations (new gossip IP) from same-IP geo-database
+  // reclassifications. Additive output; nothing existing changes.
+  {
+    const prevShadowRows = storage.listGeoShadowForEpoch(latestEpoch - 1);
+    if (prevShadowRows.length > 0) {
+      const prevByPubkey = new Map(prevShadowRows.map((r) => [r.validator_pubkey, r]));
+      const currShadowRows = storage.listGeoShadowForEpoch(latestEpoch);
+      type Relocation = {
+        vote_pubkey: string;
+        name: string | null;
+        from: string;
+        to: string;
+        from_share: number | null;
+        to_share: number | null;
+        stake_sol: number;
+        ip_changed: boolean;
+      };
+      const relocations: Relocation[] = [];
+      let changedStakeSol = 0;
+      for (const curr of currShadowRows) {
+        const prev = prevByPubkey.get(curr.validator_pubkey);
+        if (!prev) continue;
+        const from = prev.canonical_country;
+        const to = curr.canonical_country;
+        if (!from || !to || from === to) continue;
+        const v = storage.getValidator(curr.validator_pubkey);
+        const stakeSol =
+          v?.activated_stake_lamports != null ? Number(v.activated_stake_lamports) / 1e9 : 0;
+        if (stakeSol <= 0) continue;
+        changedStakeSol += stakeSol;
+        relocations.push({
+          vote_pubkey: curr.validator_pubkey,
+          name: v?.identity_name ?? null,
+          from,
+          to,
+          from_share: shadowShares.country.get(from) ?? null,
+          to_share: shadowShares.country.get(to) ?? null,
+          stake_sol: stakeSol,
+          ip_changed:
+            prev.ip_used != null && curr.ip_used != null && prev.ip_used !== curr.ip_used,
+        });
+      }
+      relocations.sort((a, b) => b.stake_sol - a.stake_sol);
+
+      // "Rare" = a real relocation (IP changed) into a country holding < 1%
+      // of active network stake — the decentralisation-positive subset.
+      const RARE_SHARE_MAX = 0.01;
+      const rare = relocations.filter(
+        (r) => r.ip_changed && r.to_share != null && r.to_share < RARE_SHARE_MAX,
+      );
+      const destByCountry = new Map<string, { country: string; share: number | null; validators: number; stake_sol: number }>();
+      for (const r of rare) {
+        const d = destByCountry.get(r.to) ?? { country: r.to, share: r.to_share, validators: 0, stake_sol: 0 };
+        d.validators += 1;
+        d.stake_sol += r.stake_sol;
+        destByCountry.set(r.to, d);
+      }
+
+      await atomicWriteJson(join(shadowOutputDir, 'geo-moves-latest.json'), {
+        epoch: latestEpoch,
+        prev_epoch: latestEpoch - 1,
+        last_published_at: new Date().toISOString(),
+        note:
+          'Country-level geo changes between consecutive epoch snapshots (merged geo). ' +
+          'ip_changed=true means the gossip IP also changed (a real relocation, not a ' +
+          'geo-database reclassification). rare_relocations = ip_changed moves into ' +
+          'countries holding < 1% of active network stake.',
+        country_changes: { count: relocations.length, stake_sol: changedStakeSol },
+        relocations,
+        rare_relocations: {
+          count: rare.length,
+          stake_sol: rare.reduce((s, r) => s + r.stake_sol, 0),
+          destinations: [...destByCountry.values()].sort((a, b) => b.stake_sol - a.stake_sol),
+        },
+      });
+      log.info('shadow.geo_moves.written', {
+        epoch: latestEpoch,
+        country_changes: relocations.length,
+        rare_relocations: rare.length,
+      });
+    }
+  }
+
   // Per-epoch frozen file — write-once on epoch advance, identical
   // semantics to Pass A.
   const perEpochPath = join(shadowOutputDir, `leaderboard-${latestEpoch}.json`);
