@@ -4,7 +4,7 @@ A public, per-epoch leaderboard ranking Solana stake pools by **stake-weighted g
 
 The metric, the data, and the methodology are open. The numbers are independently reproducible from on-chain data and a small set of public APIs.
 
-The score itself is called the **GDI** (Geographic Decentralisation Index). Current methodology version: **`gdi-1.1.0`** ([version history](https://gdindex.app/methodology#version-policy)).
+The score itself is called the **GDI** (Geographic Decentralisation Index). Current methodology version: **`gdi-1.1.1`** ([version history](https://gdindex.app/methodology#version-policy)).
 
 ## What it answers
 

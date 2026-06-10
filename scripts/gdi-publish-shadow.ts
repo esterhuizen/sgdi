@@ -282,8 +282,14 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
     const RARITY_FLOOR = 1e-9;
     const rarityFromShareViz = (share: number) =>
       share > 0 ? -Math.log(share) : -Math.log(RARITY_FLOOR);
-    const rarityViz = (dim: 'country' | 'city' | 'asn', bucket: string | null): number | null =>
-      bucket ? rarityFromShareViz(shadowShares[dim].get(bucket) ?? 0) : null;
+    // Buckets absent from the active-set shares (e.g. delinquent-only) render
+    // as null, matching the gdi-1.1.1 scorer which excludes them from DC —
+    // not as the alarming-looking 20.7 floor.
+    const rarityViz = (dim: 'country' | 'city' | 'asn', bucket: string | null): number | null => {
+      if (!bucket) return null;
+      const share = shadowShares[dim].get(bucket);
+      return share == null ? null : rarityFromShareViz(share);
+    };
 
     const validatorsInline = snaps.map((s) => {
       const merged = mergedByPubkey.get(s.validator_pubkey) ?? null;

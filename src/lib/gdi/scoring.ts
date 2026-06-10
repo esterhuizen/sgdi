@@ -3,7 +3,7 @@
 // This is the soul of SGDI. It must remain side-effect-free, deterministic,
 // and unit-testable without mocks. Stays pure or the design has failed.
 //
-// Methodology (gdi-1.1.0):
+// Methodology (gdi-1.1.1):
 //
 // Version history:
 //   gdi-1.0.0  Initial. Network shares computed over { activated_stake > 0 } —
@@ -15,6 +15,16 @@
 //              hold stake but don't vote and shouldn't count as part of the
 //              network's stake-weighted denominator. Existing pool_scores
 //              under gdi-1.0.0 remain unchanged; new ingest writes 1.1.0.
+//   gdi-1.1.1  Pool members whose bucket is ABSENT from the network-share
+//              denominator (e.g. a delinquent validator: excluded from the
+//              active set, so its country/city/ASN may have zero share) are
+//              now treated as NON-PLACEABLE — excluded from DC and reflected
+//              in placementCoverage — instead of receiving the defensive
+//              -ln(1e-9) ≈ 20.7 floor rarity. Exposed 2026-06-10: a transient
+//              Stakewiz delinquency flag on a 13.4M-SOL validator emptied its
+//              ASN bucket and inflated its pools' GDI by up to +106% for one
+//              30-minute publish cycle. Delinquent stake contributes nothing
+//              to network decentralisation; it must not raise a pool's score.
 //
 //
 //   For each validator v in a pool with stake fraction wᵥ:
@@ -32,7 +42,7 @@
 //   geographic / network positions — directly contributing to network
 //   decentralisation.
 
-export const METHODOLOGY_VERSION = 'gdi-1.1.0';
+export const METHODOLOGY_VERSION = 'gdi-1.1.1';
 
 /**
  * Lower-bound on a category's network share when computing rarity. Prevents
@@ -180,11 +190,17 @@ export function decentralisationContribution(
   shares: ReadonlyMap<string, number>,
   getBucket: (m: ValidatorMetadata | undefined) => string | null,
 ): number {
+  // A bucket that is absent from the shares map is not part of the network
+  // denominator (typically: the only validators in it are delinquent, so it
+  // holds zero active stake). Validators in such buckets are NON-PLACEABLE —
+  // skipped from numerator and denominator, like null-geo validators — rather
+  // than scored at the -ln(1e-9) floor. (gdi-1.1.1; see version history.)
   let placeableTotal = 0n;
   let weighted = 0;
   for (const r of rows) {
     const bucket = getBucket(meta.get(r.pubkey));
     if (bucket == null || bucket.trim() === '') continue;
+    if (!shares.has(bucket)) continue;
     placeableTotal += r.stakeLamports;
   }
   if (placeableTotal === 0n) return Number.NaN;
@@ -192,8 +208,10 @@ export function decentralisationContribution(
   for (const r of rows) {
     const bucket = getBucket(meta.get(r.pubkey));
     if (bucket == null || bucket.trim() === '') continue;
+    const share = shares.get(bucket);
+    if (share == null) continue;
     const w = Number(r.stakeLamports) / totalNum;
-    weighted += w * rarityFromShare(shares.get(bucket) || 0);
+    weighted += w * rarityFromShare(share);
   }
   return weighted;
 }
@@ -255,10 +273,13 @@ export function computePoolScores(
   for (const r of rows) {
     total += r.stakeLamports;
     const m = meta.get(r.pubkey);
+    // Placeable = geo known on all three dimensions AND every bucket present
+    // in the network denominator. A delinquent-only bucket fails the second
+    // condition, so the validator shows up as a coverage gap, not a score.
     if (
-      m?.country != null && m.country.trim() !== '' &&
-      m.city    != null && m.city.trim()    !== '' &&
-      m.asn     != null && m.asn.trim()     !== ''
+      m?.country != null && m.country.trim() !== '' && shares.country.has(m.country) &&
+      m.city    != null && m.city.trim()    !== '' && shares.city.has(m.city) &&
+      m.asn     != null && m.asn.trim()     !== '' && shares.asn.has(m.asn)
     ) {
       placeable += r.stakeLamports;
     }

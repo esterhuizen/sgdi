@@ -433,6 +433,14 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     addColumn('validators', 'identity_pubkey',          'TEXT');
     addColumn('validators', 'activated_stake_lamports', 'INTEGER');
     addColumn('validators', 'delinquent',               'INTEGER');
+    // Consecutive raw delinquent=true samples from the source. The effective
+    // `delinquent` flag only flips to 1 after TWO consecutive samples (~1h at
+    // the 30-min cadence); recovery is immediate on one healthy sample. A
+    // single bad Stakewiz sample on 2026-06-10 (13.4M-SOL validator briefly
+    // flagged) emptied its ASN bucket from the active set and inflated its
+    // pools' GDI by +106% for one publish cycle — this hysteresis stops that
+    // class of blip from ever reaching scoring.
+    addColumn('validators', 'delinquent_raw_streak',    'INTEGER');
     addColumn('validators', 'image_url',                'TEXT');
     // gdi-1.2 phase 1 — client diversity + operational columns. Additive;
     // existing installs migrate forward, fields stay null until next ingest fills them.
@@ -482,13 +490,13 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         (validator_pubkey, identity_pubkey, identity_name, country, city, asn, asn_name, datacenter,
          country_source, city_source, asn_source, metadata_refreshed_at,
          stakewiz_wiz_score, stakewiz_city_concentration, stakewiz_asn_concentration, stakewiz_refreshed_at,
-         activated_stake_lamports, delinquent, image_url,
+         activated_stake_lamports, delinquent, delinquent_raw_streak, image_url,
          client_name, client_version, is_jito, is_dz, ibrl_score, is_bam)
       VALUES
         (@validator_pubkey, @identity_pubkey, @identity_name, @country, @city, @asn, @asn_name, @datacenter,
          @country_source, @city_source, @asn_source, @metadata_refreshed_at,
          @stakewiz_wiz_score, @stakewiz_city_concentration, @stakewiz_asn_concentration, @stakewiz_refreshed_at,
-         @activated_stake_lamports, @delinquent, @image_url,
+         @activated_stake_lamports, @delinquent, CASE WHEN @delinquent = 1 THEN 1 ELSE 0 END, @image_url,
          @client_name, @client_version, @is_jito, @is_dz, @ibrl_score, @is_bam)
       ON CONFLICT(validator_pubkey) DO UPDATE SET
         -- Text fields use NULLIF(...,'') so an EMPTY value from a source never
@@ -513,7 +521,23 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         stakewiz_asn_concentration  = COALESCE(excluded.stakewiz_asn_concentration,  validators.stakewiz_asn_concentration),
         stakewiz_refreshed_at       = COALESCE(excluded.stakewiz_refreshed_at,       validators.stakewiz_refreshed_at),
         activated_stake_lamports    = COALESCE(excluded.activated_stake_lamports,    validators.activated_stake_lamports),
-        delinquent                  = COALESCE(excluded.delinquent,                  validators.delinquent),
+        -- Delinquency hysteresis: the raw source flag bumps/clears a streak
+        -- counter; the EFFECTIVE delinquent flag flips to 1 only on the 2nd
+        -- consecutive raw=1 sample, and clears immediately on raw=0. NULL raw
+        -- (source missing this cycle) leaves both untouched. SQLite evaluates
+        -- both RHS against the pre-update row, so the delinquent expression
+        -- sees the OLD streak; the same +1 therefore appears in both.
+        delinquent_raw_streak       = CASE
+                                        WHEN excluded.delinquent IS NULL THEN validators.delinquent_raw_streak
+                                        WHEN excluded.delinquent = 0     THEN 0
+                                        ELSE COALESCE(validators.delinquent_raw_streak, 0) + 1
+                                      END,
+        delinquent                  = CASE
+                                        WHEN excluded.delinquent IS NULL THEN validators.delinquent
+                                        WHEN excluded.delinquent = 0     THEN 0
+                                        WHEN COALESCE(validators.delinquent_raw_streak, 0) + 1 >= 2 THEN 1
+                                        ELSE COALESCE(validators.delinquent, 0)
+                                      END,
         image_url                   = COALESCE(NULLIF(excluded.image_url, ''),        validators.image_url),
         -- Client fields: refresh on every ingest (clients change more often than
         -- geo). excluded.* wins outright so operator-attestation updates flow through.
