@@ -17,4 +17,4 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$BRANCH")" ]; then
   exit 1
 fi
 echo "No long-running services here — timer-driven units pick up this sha on their next tick."
-echo "PROMOTED \$(git rev-parse --short HEAD) (clean, pushed)"
+echo "PROMOTED $(git rev-parse --short HEAD) (clean, pushed)"
