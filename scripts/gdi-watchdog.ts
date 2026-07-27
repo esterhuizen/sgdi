@@ -13,7 +13,9 @@
 //
 //   3. PUBLISHED-OUTPUT SANITY — is what we just published *plausible*?
 //      (a) active-set stake hasn't swung > STAKE_DELTA_PCT between ticks,
-//      (b) no pool's GDI moved > POOL_GDI_DELTA_PCT within one epoch,
+//      (b) no pool's GDI moved > POOL_GDI_DELTA_PCT within one epoch, once
+//          that epoch is past its settle window (re-scores before then are
+//          the ingest correcting a pre-crank photo, not a fault),
 //      (c) no published pool carries stake-weighted floor-rarity values.
 //      Catches upstream data blips (e.g. the 2026-06-10 transient Stakewiz
 //      delinquency flag that briefly inflated BNSOL's GDI by +106%).
@@ -34,6 +36,7 @@ import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openStorage } from '../src/lib/gdi/storage.ts';
+import { settleWindowState } from '../src/lib/gdi/epoch-gate.ts';
 import { sendSgdiAlert } from '../src/lib/gdi/telegram.ts';
 
 const exec = promisify(execFile);
@@ -96,6 +99,11 @@ type SanityState = {
   epoch: number;
   active_stake_sol: number;
   pools: Record<string, number>; // pool_address → gdi
+  // First tick that saw this epoch, in ms. Ages the settle window for check 3b
+  // without needing chain access. Absent on state files written before this
+  // field existed, and stays absent for the rest of that epoch — read as "long
+  // ago", i.e. 3b armed, matching the old behaviour.
+  epoch_first_seen_ms?: number;
 };
 
 function readSanityState(): SanityState | null {
@@ -170,7 +178,30 @@ function runSanityChecks(problems: string[]): void {
   // 3b. Per-pool GDI jump within the same epoch. Scores legitimately step at
   // epoch boundaries; an intra-epoch jump this size means the inputs moved
   // under the pool, not the pool itself.
-  if (prev && prev.epoch === lb.epoch) {
+  //
+  // Exception: the settle window. gdi-ingest re-captures and re-scores the
+  // current epoch until every pool has been photographed after its own update
+  // crank (see epoch-gate.ts), and those re-scores move GDI legitimately —
+  // that is the whole point of them. The window is bounded by
+  // SETTLE_WINDOW_SECONDS, so 3b simply stands down for the first hours of an
+  // epoch and is armed for the remaining ~40+. Suppressing on "the score was
+  // recomputed since the last tick" instead would disarm the check entirely:
+  // published GDI comes straight from pool_scores, so it can ONLY move when a
+  // recompute happened — the two conditions are the same event.
+  //
+  // settleWindowState only stamps epoch_first_seen_ms when the epoch CHANGES,
+  // and reads an absent stamp (state file older than the field) as "armed" —
+  // back-stamping it with `now` would blind the check for a full window on an
+  // epoch that has in fact been running for two days. It ages the window off
+  // the wall clock, while the ingest gate uses slot-derived epoch age; close
+  // but deliberately not identical windows.
+  const { firstSeenMs: epochFirstSeenMs, inSettleWindow } = settleWindowState({
+    prevEpoch: prev?.epoch ?? null,
+    currentEpoch: lb.epoch,
+    prevFirstSeenMs: prev?.epoch_first_seen_ms,
+    nowMs: Date.now(),
+  });
+  if (prev && prev.epoch === lb.epoch && !inSettleWindow) {
     for (const p of lb.pools) {
       const old = prev.pools[p.pool_address];
       if (old == null || old <= 0 || p.gdi == null || p.gdi <= 0) continue;
@@ -212,7 +243,12 @@ function runSanityChecks(problems: string[]): void {
   // cooldown handles repeats; a persistent condition re-fires after cooldown.
   const pools: Record<string, number> = {};
   for (const p of lb.pools) if (p.gdi != null) pools[p.pool_address] = p.gdi;
-  writeSanityState({ epoch: lb.epoch, active_stake_sol: activeStakeSol, pools });
+  writeSanityState({
+    epoch: lb.epoch,
+    active_stake_sol: activeStakeSol,
+    pools,
+    epoch_first_seen_ms: epochFirstSeenMs,
+  });
 }
 
 async function getTimerLastTriggerMs(): Promise<number | null> {

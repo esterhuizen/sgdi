@@ -12,12 +12,12 @@
 // is unaffected.
 
 import { writeFile, mkdir, rename } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ModuleLogger } from '../src/lib/gdi/logger.ts';
 import {
   type Storage, type PoolScore, type NetworkBaseline,
 } from '../src/lib/gdi/storage.ts';
+import { maxArchivedLeaderboardEpoch } from '../src/lib/gdi/published-archive.ts';
 import {
   METHODOLOGY_VERSION,
   computePoolScores,
@@ -653,10 +653,24 @@ export async function runShadowPass(input: ShadowPassInput): Promise<ShadowPassR
     }
   }
 
-  // Per-epoch frozen file — write-once on epoch advance, identical
-  // semantics to Pass A.
+  // Per-epoch file — rewritten while this is the live epoch, frozen once the
+  // epoch rolls over. Identical semantics to Pass A: `latestEpoch` is always
+  // the newest scored epoch, so earlier epochs' files are never touched again,
+  // while the current one can still be corrected after a pool cranks its
+  // transient stake (see the settle gate in gdi-ingest).
+  // Same regression guard as Pass A: a force re-ingest or a DB restore can
+  // leave latestEpoch behind the newest archive already on disk, which must not
+  // be overwritten with a partial one.
   const perEpochPath = join(shadowOutputDir, `leaderboard-${latestEpoch}.json`);
-  if (!existsSync(perEpochPath)) {
+  const archivedMaxEpoch = maxArchivedLeaderboardEpoch(shadowOutputDir);
+  if (archivedMaxEpoch != null && latestEpoch < archivedMaxEpoch) {
+    log.warn('shadow.epoch_snapshot_refused', {
+      epoch: latestEpoch,
+      archived_max_epoch: archivedMaxEpoch,
+      path: perEpochPath,
+      reason: 'scored epoch is behind the newest archive on disk — not overwriting it',
+    });
+  } else {
     await atomicWriteJson(perEpochPath, leaderboard);
     log.info('shadow.epoch_snapshot_frozen', { epoch: latestEpoch, path: perEpochPath });
   }

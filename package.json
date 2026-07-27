@@ -15,7 +15,7 @@
     "publish": "node --experimental-strip-types scripts/gdi-publish.ts",
     "backfill": "node --experimental-strip-types scripts/gdi-backfill.ts",
     "daily-report": "node --experimental-strip-types scripts/gdi-daily-report.ts",
-    "test": "node --test --experimental-strip-types tests/scoring.test.ts",
+    "test": "node --test --experimental-strip-types tests/scoring.test.ts tests/snapshot-settle.test.ts tests/validator-list-decode.test.ts tests/delinquency-debounce.test.ts",
     "verify": "node --experimental-strip-types scripts/gdi-verify.ts"
   },
   "dependencies": {

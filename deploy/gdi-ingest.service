@@ -1,12 +1,14 @@
 # /etc/systemd/system/gdi-ingest.service
 #
-# Oneshot — fired by gdi-ingest.timer every 30 min. Runs the ingest pipeline
+# Oneshot — fired by gdi-ingest.timer every 15 min. Runs the ingest pipeline
 # (detect epoch → snapshot pools → enrich validators → score → baseline)
 # followed by the publish step (regenerate static JSON files).
 #
-# Idempotent: if the current epoch was already ingested, the ingest step
-# bails immediately and publish runs anyway (regenerates the JSONs from
-# whatever's in SQLite — useful after a methodology bump).
+# Idempotent: the ingest step runs the pool pipeline at the epoch boundary and
+# keeps re-running it until the epoch has settled — every pool photographed
+# after its own update crank (see src/lib/gdi/epoch-gate.ts). Once settled it
+# refreshes validator metadata only. Publish runs either way (regenerates the
+# JSONs from whatever's in SQLite — useful after a methodology bump).
 #
 # Reads HELIUS_RPC_URL + VALIDATORS_APP_TOKEN from /etc/default/sgdi.env
 # (chmod 600, root-only — never committed).

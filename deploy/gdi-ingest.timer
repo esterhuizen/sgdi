@@ -1,16 +1,22 @@
 # /etc/systemd/system/gdi-ingest.timer
 #
-# Every 30 min. Most fires are no-ops — the ingest script bails immediately
-# when the current epoch has already been ingested. The full pipeline only
-# runs once per epoch (≈ 2-3 days).
+# Every 15 min. Most fires are cheap — once the current epoch has settled, the
+# ingest script refreshes validator metadata only and leaves the pool pipeline
+# alone. The full pipeline runs at the epoch boundary and then repeats until
+# every pool has been photographed after its own per-epoch update crank (see
+# src/lib/gdi/epoch-gate.ts), normally one or two extra ticks.
+#
+# The cadence sets the worst-case lag between an epoch boundary and an accurate
+# published GDI: 15 min here, plus however long the pools take to crank —
+# against a 35 min target.
 #
 # Enable: sudo systemctl daemon-reload && sudo systemctl enable --now gdi-ingest.timer
 
 [Unit]
-Description=SGDI ingest cycle (every 30 min)
+Description=SGDI ingest cycle (every 15 min)
 
 [Timer]
-OnCalendar=*:0/30
+OnCalendar=*:0/15
 RandomizedDelaySec=2min
 Persistent=true
 Unit=gdi-ingest.service

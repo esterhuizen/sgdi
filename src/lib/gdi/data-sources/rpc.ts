@@ -273,6 +273,11 @@ export type PoolValidatorEntry = {
   activeStakeLamports: bigint;
   /** Stake in flight (activating or deactivating). Reported but not used for scoring. */
   transientStakeLamports: bigint;
+  /** Epoch in which the pool last cranked this entry's stake fields. Upstream:
+   *  "if `last_update_epoch` does not match the current epoch then this field
+   *  may not be accurate" — so a value below the current epoch means the
+   *  active/transient numbers above are a pre-crank photo. */
+  lastUpdateEpoch: number;
   /** Status byte: 0=Active, 1=DeactivatingTransient, 2=ReadyForRemoval, etc. Reported as-is. */
   status: number;
 };
@@ -314,6 +319,9 @@ export function parseValidatorListAccount(buf: Buffer): ValidatorListAccount {
     validators.push({
       activeStakeLamports:    buf.readBigUInt64LE(start + 0),
       transientStakeLamports: buf.readBigUInt64LE(start + 8),
+      // Epoch numbers are far inside Number's safe range; keep it a number so
+      // it round-trips through SQLite and compares without casts.
+      lastUpdateEpoch:        Number(buf.readBigUInt64LE(start + 16)),
       status:                 buf.readUInt8(start + 40),
       votePubkey: base58Encode(buf.subarray(start + 41, start + 73)),
     });

@@ -8,7 +8,10 @@
 //   methodology.json                       version + formula constants
 //   network-baseline.json                  latest + per-epoch history
 //   leaderboard-latest.json                current epoch, all pools
-//   leaderboard-<epoch>.json               immutable historical snapshot
+//   leaderboard-<epoch>.json               per-epoch archive: rewritten while
+//                                          it IS the live epoch (so a pre-crank
+//                                          photo can be corrected), immutable
+//                                          once the epoch rolls over
 //   pools/<address>/latest.json            current pool score + per-validator
 //   pools/<address>/history.json           full per-epoch trend
 //   validators.json                        validator metadata directory
@@ -23,10 +26,10 @@
 //                            /var/lib/sgdi/published in prod)
 
 import { writeFile, mkdir, rename } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { adhocLogger } from '../src/lib/gdi/logger.ts';
 import { openStorage, type ValidatorRow, type PoolScore, type NetworkBaseline } from '../src/lib/gdi/storage.ts';
+import { maxArchivedLeaderboardEpoch } from '../src/lib/gdi/published-archive.ts';
 import { METHODOLOGY_VERSION } from '../src/lib/gdi/scoring.ts';
 import { runShadowPass } from './gdi-publish-shadow.ts';
 
@@ -313,25 +316,40 @@ async function main() {
     }),
   };
   await atomicWriteJson(join(OUTPUT_DIR, 'leaderboard-latest.json'), leaderboard);
-  // Per-epoch file is write-once: first publish of an epoch freezes its
-  // ranking snapshot, subsequent publishes within the same epoch don't touch
-  // it. Consumers (e.g. the auto-poster) get a stable "start-of-epoch" view
-  // that's independent of intra-epoch ingest re-runs.
+  // Per-epoch file tracks the current epoch and freezes when the epoch rolls
+  // over. It used to be write-once from the FIRST publish of an epoch, which
+  // archived the boundary photo — captured before the pools crank transient
+  // stake into active, so a mis-stated epoch could never be corrected (see the
+  // settle gate in gdi-ingest). `latestEpoch` is by definition the newest
+  // scored epoch, so this path only ever addresses the live epoch; files for
+  // earlier epochs are never written again and stay immutable.
   const perEpochPath = join(OUTPUT_DIR, `leaderboard-${latestEpoch}.json`);
   // When the merged (Pass B) publish writes into this SAME OUTPUT_DIR — the
-  // post-consolidation config — Pass B owns the per-epoch frozen file (merged
-  // geo, write-once). Pass A must NOT write a Stakewiz frozen file first, or
-  // Pass B's write-once check would see it exists and skip, leaving the frozen
-  // snapshot on stale Stakewiz geo. When the dirs differ (default / pre-
-  // consolidation) behaviour is unchanged. See the canonical consolidation.
+  // post-consolidation config — Pass B owns the per-epoch file (merged geo).
+  // Pass A must NOT write a Stakewiz file there, or it would overwrite Pass B's
+  // merged-geo archive. When the dirs differ (default / pre-consolidation)
+  // behaviour is unchanged. See the canonical consolidation.
   const mergedOwnsGeo =
     process.env.SGDI_SHADOW_ENABLED !== 'false' &&
     resolve(process.env.SGDI_SHADOW_PUBLISHED_DIR || `${OUTPUT_DIR}-shadow`) === OUTPUT_DIR;
-  if (!mergedOwnsGeo && !existsSync(perEpochPath)) {
+  // Guard against the scored epoch going BACKWARDS: the force-re-ingest recipe
+  // in docs/MAINTENANCE.md and a DB restore both leave latestScoredEpoch()
+  // reporting an older epoch for a while, and rewriting is only ever correct
+  // for the newest epoch on disk.
+  const archivedMaxEpoch = maxArchivedLeaderboardEpoch(OUTPUT_DIR);
+  const epochRegressed = archivedMaxEpoch != null && latestEpoch < archivedMaxEpoch;
+  if (mergedOwnsGeo) {
+    log.debug('publish.epoch_snapshot_kept', { epoch: latestEpoch, mergedOwnsGeo });
+  } else if (epochRegressed) {
+    log.warn('publish.epoch_snapshot_refused', {
+      epoch: latestEpoch,
+      archived_max_epoch: archivedMaxEpoch,
+      path: perEpochPath,
+      reason: 'scored epoch is behind the newest archive on disk — not overwriting it',
+    });
+  } else {
     await atomicWriteJson(perEpochPath, leaderboard);
     log.info('publish.epoch_snapshot_frozen', { epoch: latestEpoch, path: perEpochPath });
-  } else {
-    log.debug('publish.epoch_snapshot_kept', { epoch: latestEpoch, mergedOwnsGeo });
   }
 
   // 4. per-pool latest + history

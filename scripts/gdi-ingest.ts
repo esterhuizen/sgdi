@@ -1,9 +1,10 @@
 // scripts/gdi-ingest.ts
 //
-// Entry point fired by gdi-ingest.timer (every 30 min by default). Detects
+// Entry point fired by gdi-ingest.timer (every 15 min by default). Detects
 // new epoch via RPC; if found, runs full pipeline:
 //
-//   1. detect epoch (bail if already ingested)
+//   1. detect epoch (metadata-only refresh once the epoch has settled —
+//      every pool photographed after its own update crank; see epoch-gate.ts)
 //   2. start ingestion_runs row
 //   3. for each tracked pool: capture per-validator delegation snapshot
 //   4. fetch Stakewiz + Validators.app validator metadata
@@ -12,7 +13,8 @@
 //   7. compute network baseline GDI
 //   8. mark run success/partial/failed
 //
-// Idempotent: re-running for a given epoch is a no-op (step 1 bails).
+// Idempotent: every write is a delete+insert or an upsert keyed on the epoch,
+// so re-running the full pipeline for an epoch just refreshes it in place.
 //
 // Run directly:    node --experimental-strip-types scripts/gdi-ingest.ts
 // Run via npm:     npm run ingest
@@ -42,6 +44,7 @@ import { createDoubleZero } from '../src/lib/gdi/data-sources/doublezero.ts';
 import { createBam } from '../src/lib/gdi/data-sources/bam.ts';
 import { createJupiter, buildMintNameMap } from '../src/lib/gdi/data-sources/jupiter.ts';
 import { enrichValidators } from '../src/lib/gdi/enrichment.ts';
+import { shouldRefreshEpoch } from '../src/lib/gdi/epoch-gate.ts';
 import {
   computePoolScores,
   computeNetworkBaseline,
@@ -63,6 +66,11 @@ const TOP_POOLS_BY_TVL = Number(process.env.SGDI_TOP_POOLS ?? 100);
 // dust / mass-delegation experiments that spread tiny stake across many
 // validators and would otherwise dominate the GDI leaderboard.
 const MIN_POOL_TVL_LAMPORTS = 20_000n * 1_000_000_000n; // 20,000 SOL
+
+// Solana's mainnet slot time. Used only to turn slotIndex into an approximate
+// epoch age for the settle window — a few minutes of drift is irrelevant
+// against a 6h box.
+const APPROX_SLOT_SECONDS = 0.4;
 
 type WatchlistEntry = {
   pool_address: string;
@@ -122,13 +130,11 @@ async function main() {
     slots_in_epoch: epochInfo.slotsInEpoch,
   });
 
-  // 2. Bail if this epoch's already done — BUT still refresh validator
-  //    metadata. Stakewiz updates delinquent / stake / IP geolocation
-  //    intra-epoch; the per-validator lookup page needs this fresh.
-  //    The pool snapshots / scores / baseline are left untouched (those
-  //    are by-design per-epoch artifacts).
-  if (storage.isEpochAlreadyIngested(epoch)) {
-    log.info('epoch.skipped', { epoch, reason: 'already_ingested' });
+  // Metadata-only refresh. Runs instead of the full pipeline when this epoch
+  // has already settled, and as the fallback when a refresh run can't discover
+  // pools — Stakewiz updates delinquent / stake / IP geolocation intra-epoch
+  // and the per-validator lookup page needs that fresh either way.
+  async function refreshValidatorMetadata(mode: string): Promise<void> {
     try {
       const swData = await stakewiz.fetchAllValidators();
       let vaData = await validatorsApp.fetchAllValidators().catch(() => []);
@@ -172,21 +178,63 @@ async function main() {
         now: nowSeconds(),
       });
       storage.upsertValidators(refreshed);
-      log.info('validators.refreshed', { count: refreshed.length, mode: 'skip-path' });
+      log.info('validators.refreshed', { count: refreshed.length, mode });
     } catch (e) {
       log.warn('validators.refresh.failed', { error: errMessage(e) });
     }
+  }
+
+  // 2. Decide between the metadata-only skip path and a full (re-)ingest.
+  //
+  //    Pool snapshots are not a write-once per-epoch artifact. The first run
+  //    after an epoch boundary usually lands before the pools run their own
+  //    per-epoch update crank, so a validator's stake is still parked in
+  //    transient_stake_lamports rather than merged into stake_lamports —
+  //    upstream flags exactly this ("if last_update_epoch does not match the
+  //    current epoch then this field may not be accurate"). Freezing that photo
+  //    for the whole ~2-day epoch published wrong numbers (epoch 1007: "1 SOL
+  //    from definSOL" for a validator holding 3006).
+  //
+  //    So we re-capture the current epoch until it has SETTLED — every pool
+  //    photographed post-crank and the run fully successful — and then freeze
+  //    it for the rest of the epoch exactly as before. Bounded catch-up, not a
+  //    perpetual refresh; see shouldRefreshEpoch for the rule. Re-running is
+  //    safe: delete+insert per pool, upserts everywhere else.
+  //
+  //    The settled case still refreshes validator metadata below.
+  const alreadyIngested = storage.isEpochAlreadyIngested(epoch);
+  const lastRunStatus = storage.lastRunStatusForEpoch(epoch);
+  const minLastUpdateEpoch = storage.minLastUpdateEpochForEpoch(epoch);
+  const epochAgeSeconds = Math.round(epochInfo.slotIndex * APPROX_SLOT_SECONDS);
+  const refreshing = shouldRefreshEpoch({
+    alreadyIngested,
+    lastRunStatus,
+    minLastUpdateEpoch,
+    epoch,
+    epochAgeSeconds,
+  });
+  if (alreadyIngested && !refreshing) {
+    log.info('epoch.skipped', {
+      epoch,
+      reason: 'already_ingested_settled',
+      last_run_status: lastRunStatus,
+      min_last_update_epoch: minLastUpdateEpoch,
+      epoch_age_s: epochAgeSeconds,
+    });
+    await refreshValidatorMetadata('skip-path');
     storage.close();
     return;
   }
+  if (alreadyIngested) {
+    log.info('epoch.refresh', {
+      epoch,
+      last_run_status: lastRunStatus,
+      min_last_update_epoch: minLastUpdateEpoch,
+      epoch_age_s: epochAgeSeconds,
+    });
+  }
 
   const startedAt = nowSeconds();
-  storage.startRun({
-    run_id: logger.runId,
-    epoch,
-    started_at: startedAt,
-    status: 'in_progress',
-  });
 
   // Discover the top-N stake pools on chain by TVL. Watchlist still loaded,
   // but its role is now name-override only — a curated alias for pools whose
@@ -208,6 +256,31 @@ async function main() {
     raw_count: discovered.length,
     after_min_tvl: nontrivial.length,
     min_tvl_sol: Number(MIN_POOL_TVL_LAMPORTS) / 1e9,
+  });
+
+  // A refresh run that can't see any pools has simply learned nothing: the
+  // epoch already has snapshots and scores from an earlier run, and they stay
+  // valid. Fall back to the metadata refresh the settled path would have done
+  // and leave no run row behind — recording this as a failed run would bury
+  // the epoch's real outcome in the audit log and make every later tick treat
+  // the epoch as unsettled. First ingest of an epoch keeps the old behaviour
+  // below: that one really is a failure, since nothing was captured at all.
+  if (nontrivial.length === 0 && alreadyIngested) {
+    log.warn('pools.discovered.empty', {
+      epoch,
+      mode: 'refresh',
+      hint: 'discovery returned no pools above min TVL — keeping the existing epoch data',
+    });
+    await refreshValidatorMetadata('refresh-discovery-empty');
+    storage.close();
+    return;
+  }
+
+  storage.startRun({
+    run_id: logger.runId,
+    epoch,
+    started_at: startedAt,
+    status: 'in_progress',
   });
 
   if (nontrivial.length === 0) {
@@ -281,6 +354,10 @@ async function main() {
           // already produced activeStakeLamports.
           transient_stake_lamports: v.transientStakeLamports,
           validator_status: v.status,
+          // Crank epoch for this entry — below `epoch` means we photographed
+          // the pool before it merged transient into active. Drives the
+          // settle gate at the top of main().
+          last_update_epoch: v.lastUpdateEpoch,
           captured_at: startedAt,
         })),
       );

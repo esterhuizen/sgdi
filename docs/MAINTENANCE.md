@@ -247,12 +247,24 @@ which surfaces aggregates instead.
 
 ## Force re-ingest the current epoch
 
-Ingest is idempotent per epoch: it bails on `storage.isEpochAlreadyIngested(epoch)`
-if there's a successful row in `ingestion_runs`. To force a re-run of the
-current epoch (e.g. after a code change that affects discovery / scoring):
+Ingest already re-runs the current epoch on its own until that epoch has
+**settled** — every pool snapshot taken after the pool's own per-epoch update
+crank, and the most recent run a full `success`. The rule is
+`shouldRefreshEpoch` in `src/lib/gdi/epoch-gate.ts` and reads three things:
+`ingestion_runs` (has this epoch been ingested, and how did the latest run
+end), `pool_snapshots.last_update_epoch` (the crank epoch the pool reported for
+each validator — below the snapshot's own epoch means we photographed it
+pre-crank), and the epoch's age (the catch-up window closes after
+`SETTLE_WINDOW_SECONDS`, 6h). Once settled, ticks refresh validator metadata
+only, exactly as before.
+
+So a re-run *inside* the settle window usually needs no SQL — the next timer
+tick does it. To force one outside the window (e.g. after a code change that
+affects discovery / scoring):
 
 ```sh
-# 1. Clear the idempotency row(s)
+# 1. Clear the idempotency row(s). This also resets the settle gate: with no
+#    run row, lastRunStatus is null and the next tick takes the full path.
 sudo -u definity sqlite3 /var/lib/sgdi/gdi.db \
   "DELETE FROM ingestion_runs WHERE epoch = $EPOCH AND status IN ('success', 'partial')"
 
@@ -265,13 +277,19 @@ sudo -u definity sqlite3 /var/lib/sgdi/gdi.db \
 
 # 3. Stop the timer (avoid race), fire the service, re-enable timer when done
 sudo systemctl stop gdi-ingest.timer
-sudo systemctl start gdi-ingest.service       # ~75s with 30 pools
+sudo systemctl start gdi-ingest.service       # ~17-20s measured at 25 pools
 # wait until: systemctl show -p ActiveState --value gdi-ingest.service == "inactive"
 sudo systemctl start gdi-ingest.timer
 ```
 
 The `epochs` table is informational only — deleting from it does NOT bypass
 idempotency. The check looks at `ingestion_runs`.
+
+Note that step 2 also clears `pool_snapshots.last_update_epoch` for the epoch
+(the column is per-snapshot). That is harmless: with no rows the gate reads
+"can't prove staleness", and step 1 has already forced the re-run. On rows
+written before this column shipped the value is NULL, which reads the same way
+— a pre-existing epoch never starts refreshing just because the code deployed.
 
 ## Pool discovery (gdi-1.1.x)
 

@@ -305,6 +305,10 @@ export type PoolSnapshot = {
    *    4 = DeactivatingAll
    *  NULL on rows pre-dating the migration. */
   validator_status: number | null;
+  /** Epoch in which the pool last cranked this entry's stake fields. Lower than
+   *  the snapshot's own epoch ⇒ stake_lamports is a pre-crank photo and the
+   *  stake is still sitting in transient. NULL on rows pre-dating the migration. */
+  last_update_epoch: number | null;
   captured_at: number;
 };
 
@@ -434,12 +438,16 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     addColumn('validators', 'activated_stake_lamports', 'INTEGER');
     addColumn('validators', 'delinquent',               'INTEGER');
     // Consecutive raw delinquent=true samples from the source. The effective
-    // `delinquent` flag only flips to 1 after TWO consecutive samples (~1h at
-    // the 30-min cadence); recovery is immediate on one healthy sample. A
-    // single bad Stakewiz sample on 2026-06-10 (13.4M-SOL validator briefly
+    // `delinquent` flag only flips to 1 after FOUR consecutive samples (~1h at
+    // the 15-min ingest cadence); recovery is immediate on one healthy sample.
+    // A single bad Stakewiz sample on 2026-06-10 (13.4M-SOL validator briefly
     // flagged) emptied its ASN bucket from the active set and inflated its
     // pools' GDI by +106% for one publish cycle — this hysteresis stops that
     // class of blip from ever reaching scoring.
+    //
+    // The threshold counts SAMPLES, not time, so it has to be re-derived every
+    // time gdi-ingest.timer changes cadence: it was 2 while the timer fired
+    // every 30 min, and became 4 when the settle gate moved the timer to 15.
     addColumn('validators', 'delinquent_raw_streak',    'INTEGER');
     addColumn('validators', 'image_url',                'TEXT');
     // gdi-1.2 phase 1 — client diversity + operational columns. Additive;
@@ -457,6 +465,10 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     // (active + transient activating; status disambiguates direction).
     addColumn('pool_snapshots', 'transient_stake_lamports', 'INTEGER');
     addColumn('pool_snapshots', 'validator_status',         'INTEGER');
+    // Epoch the pool last cranked this entry. Proves whether a snapshot was
+    // taken before or after the pool's per-epoch update — drives the settle
+    // gate in gdi-ingest. Null on rows written before this column existed.
+    addColumn('pool_snapshots', 'last_update_epoch',        'INTEGER');
   }
 
   const stmt = {
@@ -522,11 +534,16 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         stakewiz_refreshed_at       = COALESCE(excluded.stakewiz_refreshed_at,       validators.stakewiz_refreshed_at),
         activated_stake_lamports    = COALESCE(excluded.activated_stake_lamports,    validators.activated_stake_lamports),
         -- Delinquency hysteresis: the raw source flag bumps/clears a streak
-        -- counter; the EFFECTIVE delinquent flag flips to 1 only on the 2nd
+        -- counter; the EFFECTIVE delinquent flag flips to 1 only on the 4th
         -- consecutive raw=1 sample, and clears immediately on raw=0. NULL raw
         -- (source missing this cycle) leaves both untouched. SQLite evaluates
         -- both RHS against the pre-update row, so the delinquent expression
         -- sees the OLD streak; the same +1 therefore appears in both.
+        --
+        -- 4 samples ≈ 1h at the 15-min gdi-ingest cadence, the same protection
+        -- window the original 2-sample threshold bought at 30 min. Re-derive
+        -- this number if deploy/gdi-ingest.timer changes again; see the note on
+        -- the delinquent_raw_streak migration above.
         delinquent_raw_streak       = CASE
                                         WHEN excluded.delinquent IS NULL THEN validators.delinquent_raw_streak
                                         WHEN excluded.delinquent = 0     THEN 0
@@ -535,7 +552,7 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
         delinquent                  = CASE
                                         WHEN excluded.delinquent IS NULL THEN validators.delinquent
                                         WHEN excluded.delinquent = 0     THEN 0
-                                        WHEN COALESCE(validators.delinquent_raw_streak, 0) + 1 >= 2 THEN 1
+                                        WHEN COALESCE(validators.delinquent_raw_streak, 0) + 1 >= 4 THEN 1
                                         ELSE COALESCE(validators.delinquent, 0)
                                       END,
         image_url                   = COALESCE(NULLIF(excluded.image_url, ''),        validators.image_url),
@@ -561,10 +578,12 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     insertSnapshot: db.prepare(`
       INSERT INTO pool_snapshots
         (epoch, pool_address, validator_pubkey,
-         stake_lamports, transient_stake_lamports, validator_status, captured_at)
+         stake_lamports, transient_stake_lamports, validator_status,
+         last_update_epoch, captured_at)
       VALUES
         (@epoch, @pool_address, @validator_pubkey,
-         @stake_lamports, @transient_stake_lamports, @validator_status, @captured_at)
+         @stake_lamports, @transient_stake_lamports, @validator_status,
+         @last_update_epoch, @captured_at)
     `),
     listSnapshotsForPoolEpoch: db.prepare(`
       SELECT * FROM pool_snapshots
@@ -574,6 +593,9 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     listSnapshotsForEpoch: db.prepare(`
       SELECT * FROM pool_snapshots WHERE epoch = ? ORDER BY pool_address, stake_lamports DESC
     `),
+    minLastUpdateEpoch: db.prepare(
+      `SELECT MIN(last_update_epoch) AS m FROM pool_snapshots WHERE epoch = ?`,
+    ),
 
     upsertPoolScore: db.prepare(`
       INSERT INTO pool_scores
@@ -792,6 +814,12 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     isEpochIngested: db.prepare(`
       SELECT 1 FROM ingestion_runs WHERE epoch = ? AND status IN ('success', 'partial') LIMIT 1
     `),
+    lastRunStatusForEpoch: db.prepare(`
+      SELECT status FROM ingestion_runs
+      WHERE epoch = ?
+      ORDER BY started_at DESC, rowid DESC
+      LIMIT 1
+    `),
   };
 
   function replaceSnapshotsForPoolEpoch(
@@ -802,6 +830,7 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
       stake_lamports: bigint;
       transient_stake_lamports: bigint;
       validator_status: number;
+      last_update_epoch: number;
       captured_at: number;
     }[],
   ): void {
@@ -815,6 +844,7 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
           stake_lamports: s.stake_lamports,
           transient_stake_lamports: s.transient_stake_lamports,
           validator_status: s.validator_status,
+          last_update_epoch: s.last_update_epoch,
           captured_at: s.captured_at,
         });
       }
@@ -882,6 +912,16 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     },
     listSnapshotsForEpoch(epoch: number): PoolSnapshot[] {
       return stmt.listSnapshotsForEpoch.all(epoch) as PoolSnapshot[];
+    },
+    /** Oldest crank epoch across this epoch's snapshots — the settle test: a
+     *  value below `epoch` means at least one pool was photographed before it
+     *  cranked. Null when no row carries the field (all rows pre-date the
+     *  column, or there are none), which reads as "can't prove staleness".
+     *  SQL MIN ignores NULLs, so a part-migrated epoch still reports the
+     *  oldest known crank rather than going blind. */
+    minLastUpdateEpochForEpoch(epoch: number): number | null {
+      const r = stmt.minLastUpdateEpoch.get(epoch) as { m: number | null };
+      return r?.m ?? null;
     },
 
     // Pool scores
@@ -1045,6 +1085,12 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     },
     isEpochAlreadyIngested(epoch: number): boolean {
       return !!stmt.isEpochIngested.get(epoch);
+    },
+    /** Status of the most recent run for this epoch ('success' | 'partial' |
+     *  'failed' | 'in_progress'), null when the epoch has never been run. */
+    lastRunStatusForEpoch(epoch: number): string | null {
+      const r = stmt.lastRunStatusForEpoch.get(epoch) as { status: string } | undefined;
+      return r?.status ?? null;
     },
   };
 }
