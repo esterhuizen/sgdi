@@ -134,6 +134,20 @@ const countryDisplayNames = (() => {
 const COUNTRY_NAME_OVERRIDES: Record<string, string> = {
   'Hong Kong SAR China': 'Hong Kong',
   'Macao SAR China':     'Macao',
+  // Long-form official names from some geo sources — fold to the display name
+  // Intl uses for the 2-letter code, so the DC_country dimension isn't split.
+  'Republic of Lithuania': 'Lithuania',
+  'Republic of Korea':     'South Korea',
+};
+
+/** Same-place city names that arrive in >1 spelling across geo sources (usually
+ *  an ASCII fold of the proper diacritic form). Merge to the proper spelling so
+ *  the DC_city dimension counts one bucket, not several. Key = the variant to
+ *  rewrite; value = canonical display form. */
+const CITY_NAME_OVERRIDES: Record<string, string> = {
+  'Siauliai':    'Šiauliai',
+  'Sao Paulo':   'São Paulo',
+  'Russelsheim': 'Rüsselsheim',
 };
 
 /** "NL" → "Netherlands", "United States" → "United States", "" → null. */
@@ -156,14 +170,22 @@ function canonicalAsn(s: string | null): string | null {
   return `AS${stripped}`;
 }
 
-/** City + asn_name pass through unchanged — no single canonical format. */
+/** asn_name passes through unchanged — no single canonical format. */
 function canonicalPassthrough(s: string | null): string | null {
   return isPresent(s) ? s.trim() : null;
 }
 
+/** City: trim, then fold known same-place spelling variants to one canonical
+ *  form (CITY_NAME_OVERRIDES) so the GDI city dimension isn't split. */
+function canonicalCity(s: string | null): string | null {
+  if (!isPresent(s)) return null;
+  const t = s.trim();
+  return CITY_NAME_OVERRIDES[t] ?? t;
+}
+
 const CANONICALIZE: Record<'country' | 'city' | 'asn' | 'asn_name', (s: string | null) => string | null> = {
   country: canonicalCountry,
-  city: canonicalPassthrough,
+  city: canonicalCity,
   asn: canonicalAsn,
   asn_name: canonicalPassthrough,
 };

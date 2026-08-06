@@ -223,3 +223,29 @@ test('null/empty country canonicalises to null, not "ZZ" or similar', () => {
   assert.equal(r.country, null);
   assert.equal(r.sources.country, null);
 });
+
+// --- same-place spelling variants fold to one canonical bucket (GDI dimensions) ---
+test('city: ASCII variant folds to the proper diacritic form (Siauliai → Šiauliai)', () => {
+  const r = mergeGeo({ stakewiz: { country: 'Lithuania', city: 'Siauliai', asn: 'AS16125', asn_name: 'x' } });
+  assert.equal(r.city, 'Šiauliai');
+});
+
+test('city: Sao Paulo → São Paulo', () => {
+  const r = mergeGeo({ stakewiz: { country: 'Brazil', city: 'Sao Paulo', asn: 'AS1', asn_name: 'x' } });
+  assert.equal(r.city, 'São Paulo');
+});
+
+test('city: an un-mapped city passes through trimmed (regression)', () => {
+  const r = mergeGeo({ stakewiz: { country: 'Germany', city: '  Frankfurt am Main ', asn: 'AS24940', asn_name: 'x' } });
+  assert.equal(r.city, 'Frankfurt am Main');
+});
+
+test('country: Republic of Lithuania folds to the plain "Lithuania" bucket', () => {
+  const r = mergeGeo({ stakewiz: { country: 'Republic of Lithuania', city: 'Šiauliai', asn: 'AS16125', asn_name: 'x' } });
+  assert.equal(r.country, 'Lithuania');
+});
+
+test('country: Republic of Korea → South Korea', () => {
+  const r = mergeGeo({ stakewiz: { country: 'Republic of Korea', city: 'Seoul', asn: 'AS1', asn_name: 'x' } });
+  assert.equal(r.country, 'South Korea');
+});
