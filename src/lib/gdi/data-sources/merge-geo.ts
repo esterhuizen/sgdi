@@ -151,7 +151,7 @@ const CITY_NAME_OVERRIDES: Record<string, string> = {
 };
 
 /** "NL" → "Netherlands", "United States" → "United States", "" → null. */
-function canonicalCountry(s: string | null): string | null {
+export function canonicalCountry(s: string | null): string | null {
   if (!isPresent(s)) return null;
   const t = s.trim();
   let expanded = t;
@@ -177,7 +177,7 @@ function canonicalPassthrough(s: string | null): string | null {
 
 /** City: trim, then fold known same-place spelling variants to one canonical
  *  form (CITY_NAME_OVERRIDES) so the GDI city dimension isn't split. */
-function canonicalCity(s: string | null): string | null {
+export function canonicalCity(s: string | null): string | null {
   if (!isPresent(s)) return null;
   const t = s.trim();
   return CITY_NAME_OVERRIDES[t] ?? t;

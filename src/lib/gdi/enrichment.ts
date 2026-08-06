@@ -14,6 +14,7 @@ import type { ValidatorsAppValidator } from './data-sources/validators-app.ts';
 import type { IbrlValidator } from './data-sources/ibrl.ts';
 import type { ValidatorRow } from './storage.ts';
 import type { ModuleLogger } from './logger.ts';
+import { canonicalCountry, canonicalCity } from './data-sources/merge-geo.ts';
 
 export type EnrichmentInput = {
   /** Vote pubkeys we want metadata for. Result preserves this order. */
@@ -199,8 +200,10 @@ export function enrichValidators(input: EnrichmentInput): ValidatorRow[] {
       validator_pubkey: pubkey,
       identity_pubkey: sw?.identity ?? null,
       identity_name,
-      country: country.value,
-      city: city.value,
+      // Fold same-place spelling/long-form variants so the GDI country/city
+      // dimensions don't split one location into multiple buckets.
+      country: canonicalCountry(country.value),
+      city: canonicalCity(city.value),
       asn: asn.value,
       asn_name,
       datacenter,

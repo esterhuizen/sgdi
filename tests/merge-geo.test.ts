@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mergeGeo } from '../src/lib/gdi/data-sources/merge-geo.ts';
+import { mergeGeo, canonicalCountry, canonicalCity } from '../src/lib/gdi/data-sources/merge-geo.ts';
 import type { ValidatorGeoOverrideRow } from '../src/lib/gdi/storage.ts';
 
 // Helper: build a complete ValidatorGeoOverrideRow with given fields.
@@ -248,4 +248,23 @@ test('country: Republic of Lithuania folds to the plain "Lithuania" bucket', () 
 test('country: Republic of Korea → South Korea', () => {
   const r = mergeGeo({ stakewiz: { country: 'Republic of Korea', city: 'Seoul', asn: 'AS1', asn_name: 'x' } });
   assert.equal(r.country, 'South Korea');
+});
+
+// Direct unit tests — these exports also feed the MAIN enrichment path
+// (enrichment.ts), not just the shadow merge, so lock them independently.
+test('canonicalCountry: folds long-form + ISO-2, passes through the rest, null-safe', () => {
+  assert.equal(canonicalCountry('Republic of Lithuania'), 'Lithuania');
+  assert.equal(canonicalCountry('Republic of Korea'), 'South Korea');
+  assert.equal(canonicalCountry('NL'), 'Netherlands');   // ISO-2 expansion
+  assert.equal(canonicalCountry('Lithuania'), 'Lithuania'); // already canonical
+  assert.equal(canonicalCountry(null), null);
+  assert.equal(canonicalCountry('  '), null);
+});
+
+test('canonicalCity: folds known variants, trims, passes through the rest, null-safe', () => {
+  assert.equal(canonicalCity('Siauliai'), 'Šiauliai');
+  assert.equal(canonicalCity('Sao Paulo'), 'São Paulo');
+  assert.equal(canonicalCity('Russelsheim'), 'Rüsselsheim');
+  assert.equal(canonicalCity('  Frankfurt am Main '), 'Frankfurt am Main');
+  assert.equal(canonicalCity(null), null);
 });
