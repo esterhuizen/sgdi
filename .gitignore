@@ -1,3 +1,6 @@
+# secrets — never commit (this repo is public)
+/age-identity.txt
+
 # dependencies
 /node_modules
 
