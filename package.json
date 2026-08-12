@@ -13,9 +13,10 @@
     "lint": "next lint",
     "ingest": "node --experimental-strip-types scripts/gdi-ingest.ts",
     "publish": "node --experimental-strip-types scripts/gdi-publish.ts",
+    "snapshot": "node --experimental-strip-types scripts/gdi-snapshot.ts",
     "backfill": "node --experimental-strip-types scripts/gdi-backfill.ts",
     "daily-report": "node --experimental-strip-types scripts/gdi-daily-report.ts",
-    "test": "node --test --experimental-strip-types tests/scoring.test.ts tests/snapshot-settle.test.ts tests/validator-list-decode.test.ts tests/delinquency-debounce.test.ts tests/merge-geo.test.ts",
+    "test": "node --test --experimental-strip-types tests/scoring.test.ts tests/snapshot-settle.test.ts tests/validator-list-decode.test.ts tests/delinquency-debounce.test.ts tests/merge-geo.test.ts tests/snapshot.test.ts",
     "verify": "node --experimental-strip-types scripts/gdi-verify.ts"
   },
   "dependencies": {
