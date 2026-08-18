@@ -225,8 +225,8 @@ async function main() {
     },
     sources: {
       pool_delegations: 'Helius RPC (on-chain)',
-      validator_geo: 'Stakewiz (primary), Validators.app (cross-reference)',
-      network_shares: 'Computed from full Stakewiz active validator set',
+      validator_geo: 'MaxMind GeoLite2 (City + ASN), self-hosted — primary; operator overrides on top; Stakewiz then Validators.app as fallback where MaxMind has no answer (effective epoch 978+)',
+      network_shares: 'Computed over the active validator set (not delinquent AND activated_stake > 0) using the merged geo above (MaxMind-primary)',
     },
   });
 

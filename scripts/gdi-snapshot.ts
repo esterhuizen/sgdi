@@ -121,9 +121,12 @@ SELECT
 FROM validators;
 
 -- v_pools_current: the latest scored epoch's pool rows, joined to pool
--- metadata, so a caller never does epoch arithmetic. "Latest" = the global
--- MAX(epoch) in pool_scores, matching how gdi-publish picks the leaderboard
--- epoch. Ordered best-GDI-first.
+-- metadata, so a caller never does epoch arithmetic. Reads pool_scores_SHADOW —
+-- the merged-geo (MaxMind-primary) pass that gdi-publish overwrites into the
+-- served tree, so this matches gdindex.app's PUBLISHED GDI. (Canonical pool_scores
+-- is the pre-merge Stakewiz-geo table and reports a ~5-6% different, unpublished
+-- number — reading it here is the bug this view previously had.) "Latest" = the
+-- global MAX(epoch). Ordered best-GDI-first.
 CREATE VIEW v_pools_current AS
 SELECT
   ps.epoch,
@@ -141,9 +144,9 @@ SELECT
   ps.total_stake_lamports / 1000000000.0 AS total_stake_sol,
   ps.methodology_version,
   ps.computed_at
-FROM pool_scores ps
+FROM pool_scores_shadow ps
 LEFT JOIN pools p ON p.pool_address = ps.pool_address
-WHERE ps.epoch = (SELECT MAX(epoch) FROM pool_scores)
+WHERE ps.epoch = (SELECT MAX(epoch) FROM pool_scores_shadow)
 ORDER BY ps.gdi_composite DESC;
 `;
 
@@ -202,7 +205,9 @@ export function runSnapshot(opts: SnapshotOptions): SnapshotResult {
       const totalValidators = (snap.prepare('SELECT COUNT(*) AS n FROM validators').get() as { n: number }).n;
       const activeValidators = (snap.prepare('SELECT COUNT(*) AS n FROM v_validators_active').get() as { n: number }).n;
       const currentPools = (snap.prepare('SELECT COUNT(*) AS n FROM v_pools_current').get() as { n: number }).n;
-      const latestEpoch = (snap.prepare('SELECT MAX(epoch) AS e FROM pool_scores').get() as { e: number | null }).e;
+      // pool_scores_shadow — same table v_pools_current serves, so the reported
+      // epoch matches the published (merged-geo) numbers, not the canonical table.
+      const latestEpoch = (snap.prepare('SELECT MAX(epoch) AS e FROM pool_scores_shadow').get() as { e: number | null }).e;
 
       // Guard 1 — an empty active set means the DB is empty/corrupt or the
       // active predicate broke. Never publish that to the bot.

@@ -138,6 +138,11 @@ test('snapshot: v_pools_current returns only the latest epoch, GDI-ordered, with
     assert.equal(rows[0].pool_address, 'POOL_A'); // higher GDI first
     assert.equal(rows[0].pool_name, 'Alpha Pool'); // joined from pools
     assert.ok(rows[0].gdi_composite > rows[1].gdi_composite);
+    // Proves v_pools_current reads pool_scores_SHADOW (published/merged-geo), NOT
+    // canonical pool_scores: the fixture's shadow values (4.2 / 3.1) differ from
+    // canonical (3.5 / 2.5). Reading the wrong table would return 3.5 here.
+    assert.equal(rows[0].gdi_composite, 4.2);
+    assert.equal(rows[1].gdi_composite, 3.1);
   } finally {
     db.close();
   }

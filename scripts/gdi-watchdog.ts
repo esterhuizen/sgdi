@@ -186,8 +186,9 @@ function runSanityChecks(problems: string[]): void {
   // SETTLE_WINDOW_SECONDS, so 3b simply stands down for the first hours of an
   // epoch and is armed for the remaining ~40+. Suppressing on "the score was
   // recomputed since the last tick" instead would disarm the check entirely:
-  // published GDI comes straight from pool_scores, so it can ONLY move when a
-  // recompute happened — the two conditions are the same event.
+  // published GDI comes straight from the merged-geo publish (the served JSON this
+  // watchdog reads — NOT the canonical pool_scores table), so it can ONLY move when
+  // a recompute happened — the two conditions are the same event.
   //
   // settleWindowState only stamps epoch_first_seen_ms when the epoch CHANGES,
   // and reads an absent stamp (state file older than the field) as "armed" —

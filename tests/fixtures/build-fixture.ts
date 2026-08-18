@@ -16,7 +16,9 @@
 //   • one delinquent-but-staked validator (excluded from active)
 //   • one zero-stake, healthy validator (excluded from active)
 //   • one NULL-stake validator (excluded — NULL > 0 is not true)
-//   • pool_scores across two epochs so v_pools_current must pick the latest.
+//   • pool_scores + pool_scores_shadow across two epochs, with DIFFERENT values;
+//     v_pools_current reads the SHADOW (published/merged-geo) table and must pick
+//     the latest epoch — the fixture proves it isn't reading canonical pool_scores.
 
 import { rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -109,8 +111,18 @@ function build(): void {
   });
   storage.upsertPoolScore(score(100, 'POOL_A', 3.0));
   storage.upsertPoolScore(score(100, 'POOL_B', 2.0));
-  storage.upsertPoolScore(score(101, 'POOL_A', 3.5)); // latest epoch
-  storage.upsertPoolScore(score(101, 'POOL_B', 2.5)); // latest epoch
+  storage.upsertPoolScore(score(101, 'POOL_A', 3.5)); // latest epoch — canonical (NOT published)
+  storage.upsertPoolScore(score(101, 'POOL_B', 2.5)); // latest epoch — canonical (NOT published)
+
+  // pool_scores_shadow — the merged-geo (MaxMind-primary) publish table that
+  // v_pools_current actually reads (it mirrors what gdindex.app serves, unlike the
+  // canonical pre-merge pool_scores above). DISTINCT values on purpose so the test
+  // proves the view reads the SHADOW table, not the canonical one — a regression
+  // guard for the 2026-08-18 fix.
+  storage.upsertPoolScoreShadow(score(100, 'POOL_A', 3.7));
+  storage.upsertPoolScoreShadow(score(100, 'POOL_B', 2.7));
+  storage.upsertPoolScoreShadow(score(101, 'POOL_A', 4.2)); // latest — published value
+  storage.upsertPoolScoreShadow(score(101, 'POOL_B', 3.1)); // latest — published value
 
   // Fold WAL into the main file so the committed fixture is a single self-
   // contained file (no -wal/-shm sidecars to commit or clean up).
