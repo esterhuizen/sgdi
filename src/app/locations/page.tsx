@@ -67,11 +67,11 @@ export default async function LocationsPage() {
           column header to re-sort.
         </p>
         <p className="mt-3 text-base leading-relaxed text-ink-muted">
-          The default filter keeps only{' '}
+          Every location is listed by default. Tick{' '}
           <span className="font-medium text-ink">DoubleZero-supported</span>{' '}
-          locations — proven by at least one DZ validator already at that exact
-          spot — so your hosting pick maximises both rarity AND voting/block
-          performance. Toggle off to see the long tail.
+          locations only to narrow to spots proven by at least one DZ validator
+          already there — so your hosting pick maximises both rarity AND
+          voting/block performance.
         </p>
       </header>
 
