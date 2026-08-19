@@ -84,11 +84,11 @@ function SortHeader({
 }
 
 export function LocationsTable({ tuples }: { tuples: TupleRow[] }) {
-  const [dzOnly, setDzOnly] = useState(true);
+  const [dzOnly, setDzOnly] = useState(false);   // show ALL locations by default; DZ is an opt-in filter
   const [minIbrl, setMinIbrl] = useState(0);
   const [sortField, setSortField] = useState<SortField>('composite');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [showAll, setShowAll] = useState(false);
+  const [showAll, setShowAll] = useState(true);  // expand the full table by default
 
   const filtered = useMemo(() => {
     let cleaned = tuples.filter(
