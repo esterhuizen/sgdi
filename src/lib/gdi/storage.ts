@@ -239,6 +239,113 @@ CREATE TABLE IF NOT EXISTS network_shares_shadow (
 );
 CREATE INDEX IF NOT EXISTS idx_network_shares_shadow_epoch ON network_shares_shadow(epoch);
 CREATE INDEX IF NOT EXISTS idx_network_shares_shadow_dim_bucket ON network_shares_shadow(dimension, bucket);
+
+-- Continuously-refreshed per-validator geo with flap suppression. Written every
+-- ingest tick (~15 min) by src/lib/gdi/geo-live.ts on BOTH the full-ingest and
+-- the settled skip path. NO epoch column: current state, not a per-epoch
+-- photograph (that is validator_geo_shadow). stable_* is the tuple money is
+-- allowed to read; raw_* is the last observation, possibly a flap in progress.
+--
+-- INVARIANT (consumers rely on it): the stable tuple is written ATOMICALLY per
+-- row and is consumed WHOLE — a consumer takes this row's stable_* tuple entire
+-- (nulls included; partial tuples are legitimate: MaxMind can resolve ASN
+-- without City) or falls back to the validator's whole frozen shadow row.
+-- Per-dimension mixing across tiers is forbidden.
+--
+-- The debouncer treats NULL as a value: (HK, Hong Kong, AS46873) ->
+-- (HK, NULL, AS46873) is a candidate transition and debounces like any other.
+CREATE TABLE IF NOT EXISTS validator_geo_live (
+  validator_pubkey     TEXT PRIMARY KEY,   -- VOTE account (same key as validator_geo_shadow)
+
+  -- Last raw observation, canonicalised. NULL = no usable lookup this tick.
+  raw_country          TEXT,
+  raw_city             TEXT,
+  raw_asn              TEXT,               -- "AS46873" (canonical form)
+  raw_asn_name         TEXT,
+  ip_used              TEXT,               -- gossip ?? tpu, port stripped. NEVER published to JSON.
+
+  -- Promoted (stable) tuple — the value downstream consumers read.
+  stable_country       TEXT,
+  stable_city          TEXT,
+  stable_asn           TEXT,
+  stable_asn_name      TEXT,
+  stable_since         INTEGER,            -- unix s: promotion/bootstrap time of the current stable tuple
+  stable_observations  INTEGER NOT NULL DEFAULT 0,  -- counted obs agreeing with stable_*
+
+  -- Pending change. cand_count = 0 ⇒ no pending change.
+  cand_country         TEXT,
+  cand_city            TEXT,
+  cand_asn             TEXT,
+  cand_asn_name        TEXT,
+  cand_count           INTEGER NOT NULL DEFAULT 0,  -- counted obs agreeing with cand_*
+  cand_first_seen      INTEGER,
+
+  -- Observation bookkeeping
+  first_observed_at    INTEGER NOT NULL,
+  last_observed_at     INTEGER NOT NULL,   -- last tick this row was processed at all
+  last_counted_at      INTEGER,            -- last tick an observation COUNTED toward the machine
+  last_present_at      INTEGER,            -- last tick with a non-empty lookup
+  missing_streak       INTEGER NOT NULL DEFAULT 0,
+  bootstrap_source     TEXT                -- 'shadow-seed' | 'first-observation' | NULL
+);
+CREATE INDEX IF NOT EXISTS idx_geo_live_moving  ON validator_geo_live(cand_count);
+CREATE INDEX IF NOT EXISTS idx_geo_live_present ON validator_geo_live(last_present_at);
+
+-- One-row pass state. last_tick_at is THE freshness signal for every consumer;
+-- it is the TICK time, never a publish time (a stalled writer whose consumer
+-- re-stamps its output is invisible — the LIVE-TARGETS.md lesson).
+--
+-- The row is written ONLY when the tick cleared its stamp gate, and that gate
+-- is measured against with_ip_count, NOT observed_count. Only ~688 of the
+-- ~2,656 fleet validators advertise a resolvable gossip endpoint at all
+-- (measured, stable across 46 epochs), so present/observed sits near 0.26
+-- permanently and a gate on it would never stamp — the pass would look
+-- perpetually broken. The two counts answer two different questions:
+--   present / with_ip  →  "is MaxMind resolving what we can actually see?"
+--                         (688/688 at epoch 1023)
+--   with_ip            →  "did getClusterNodes degrade?" — a partial RPC
+--                         return of 200 endpoints must not stamp even if all
+--                         200 resolve perfectly.
+CREATE TABLE IF NOT EXISTS geo_live_meta (
+  id                 INTEGER PRIMARY KEY CHECK (id = 1),
+  last_tick_at       INTEGER NOT NULL,
+  epoch              INTEGER,
+  observed_count     INTEGER NOT NULL,
+  with_ip_count      INTEGER NOT NULL DEFAULT 0,  -- observed validators carrying a gossip/TPU endpoint
+  present_count      INTEGER NOT NULL,
+  moving_count       INTEGER NOT NULL,
+  promoted_count     INTEGER NOT NULL,
+  bootstrapped_count INTEGER NOT NULL DEFAULT 0,
+  mass_change_pct    REAL    NOT NULL,     -- 100 * promoted_count / max(1, present_count), PER TICK
+  -- NOTE: the operational alert on promotions is the events-table rate check in
+  -- gdi-watchdog (hourly sampling of this column misses most 15-min spikes);
+  -- this stays as the per-tick record.
+  city_mmdb_mtime_ms INTEGER,
+  asn_mmdb_mtime_ms  INTEGER,
+  stable_k           INTEGER NOT NULL,     -- K in force at this tick
+  stable_min_dwell_s INTEGER NOT NULL
+);
+
+-- Append-only transition log. Sizes K empirically: candidate_abandoned.dwell_s
+-- IS the flap-duration histogram, and K cannot be derived from
+-- validator_geo_shadow (one capture per ~46h epoch, so a 5-minute flap and a
+-- 2-day move are indistinguishable there).
+--
+-- Deliberately NO ip_used column: this table would otherwise ship in the
+-- publicly-served gdi-snapshot.db as a per-validator IP-transition history.
+CREATE TABLE IF NOT EXISTS validator_geo_events (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  at               INTEGER NOT NULL,
+  validator_pubkey TEXT    NOT NULL,
+  kind             TEXT    NOT NULL,  -- 'raw_change'|'promote'|'candidate_abandoned'|'missing'|'reappeared'|'bootstrap'
+  from_country     TEXT, from_city TEXT, from_asn TEXT,
+  to_country       TEXT, to_city   TEXT, to_asn   TEXT,
+  cand_count       INTEGER,
+  dwell_s          INTEGER,
+  epoch            INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_geo_events_at  ON validator_geo_events(at);
+CREATE INDEX IF NOT EXISTS idx_geo_events_val ON validator_geo_events(validator_pubkey, at);
 `;
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -390,6 +497,70 @@ export type ValidatorGeoShadowRow = {
   computed_at: number;
 };
 
+/** One row of validator_geo_live — the debounced live-geo state machine's
+ *  per-validator state. Written whole on every tick (see geo-live.ts). */
+export type ValidatorGeoLiveRow = {
+  validator_pubkey: string;
+  raw_country: string | null;
+  raw_city: string | null;
+  raw_asn: string | null;
+  raw_asn_name: string | null;
+  /** Gossip (or TPU) IP, port stripped. Never leaves the DB — see geo-live.ts. */
+  ip_used: string | null;
+  stable_country: string | null;
+  stable_city: string | null;
+  stable_asn: string | null;
+  stable_asn_name: string | null;
+  stable_since: number | null;
+  stable_observations: number;
+  cand_country: string | null;
+  cand_city: string | null;
+  cand_asn: string | null;
+  cand_asn_name: string | null;
+  cand_count: number;
+  cand_first_seen: number | null;
+  first_observed_at: number;
+  last_observed_at: number;
+  last_counted_at: number | null;
+  last_present_at: number | null;
+  missing_streak: number;
+  bootstrap_source: string | null;
+};
+
+/** The single geo_live_meta row (id = 1). */
+export type GeoLiveMetaRow = {
+  id: number;
+  last_tick_at: number;
+  epoch: number | null;
+  observed_count: number;
+  with_ip_count: number;
+  present_count: number;
+  moving_count: number;
+  promoted_count: number;
+  bootstrapped_count: number;
+  mass_change_pct: number;
+  city_mmdb_mtime_ms: number | null;
+  asn_mmdb_mtime_ms: number | null;
+  stable_k: number;
+  stable_min_dwell_s: number;
+};
+
+/** An append-only validator_geo_events row. `id` is assigned by SQLite. */
+export type ValidatorGeoEventRow = {
+  at: number;
+  validator_pubkey: string;
+  kind: 'raw_change' | 'promote' | 'candidate_abandoned' | 'missing' | 'reappeared' | 'bootstrap';
+  from_country: string | null;
+  from_city: string | null;
+  from_asn: string | null;
+  to_country: string | null;
+  to_city: string | null;
+  to_asn: string | null;
+  cand_count: number | null;
+  dwell_s: number | null;
+  epoch: number | null;
+};
+
 // ───────────────────────────────────────────────────────────────────────────
 // Repo
 // ───────────────────────────────────────────────────────────────────────────
@@ -469,6 +640,10 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     // taken before or after the pool's per-epoch update — drives the settle
     // gate in gdi-ingest. Null on rows written before this column existed.
     addColumn('pool_snapshots', 'last_update_epoch',        'INTEGER');
+    // Live-geo stamp gate moved from present/observed to present/with_ip —
+    // additive on geo_live_meta so a DB written by an earlier build of the pass
+    // migrates forward instead of failing the upsert. See the table comment.
+    addColumn('geo_live_meta', 'with_ip_count', 'INTEGER NOT NULL DEFAULT 0');
   }
 
   const stmt = {
@@ -770,6 +945,124 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     listGeoShadowForValidator: db.prepare(
       `SELECT * FROM validator_geo_shadow WHERE validator_pubkey = ? ORDER BY epoch DESC`,
     ),
+    /** Newest shadow row per validator — the live pass's bootstrap seed, so
+     *  day-0 stable state is what the system already believed. */
+    listLatestGeoShadow: db.prepare(`
+      SELECT s.* FROM validator_geo_shadow s
+      JOIN (
+        SELECT validator_pubkey, MAX(epoch) AS epoch
+        FROM validator_geo_shadow GROUP BY validator_pubkey
+      ) m ON m.validator_pubkey = s.validator_pubkey AND m.epoch = s.epoch
+    `),
+
+    // ── Live geo (validator_geo_live / geo_live_meta / validator_geo_events).
+    //    Full-row upsert: the state machine computes the next row in memory and
+    //    writes it whole, so the stable tuple can never be half-updated.
+    upsertGeoLive: db.prepare(`
+      INSERT INTO validator_geo_live (
+        validator_pubkey,
+        raw_country, raw_city, raw_asn, raw_asn_name, ip_used,
+        stable_country, stable_city, stable_asn, stable_asn_name,
+        stable_since, stable_observations,
+        cand_country, cand_city, cand_asn, cand_asn_name, cand_count, cand_first_seen,
+        first_observed_at, last_observed_at, last_counted_at, last_present_at,
+        missing_streak, bootstrap_source
+      ) VALUES (
+        @validator_pubkey,
+        @raw_country, @raw_city, @raw_asn, @raw_asn_name, @ip_used,
+        @stable_country, @stable_city, @stable_asn, @stable_asn_name,
+        @stable_since, @stable_observations,
+        @cand_country, @cand_city, @cand_asn, @cand_asn_name, @cand_count, @cand_first_seen,
+        @first_observed_at, @last_observed_at, @last_counted_at, @last_present_at,
+        @missing_streak, @bootstrap_source
+      )
+      ON CONFLICT(validator_pubkey) DO UPDATE SET
+        raw_country         = excluded.raw_country,
+        raw_city            = excluded.raw_city,
+        raw_asn             = excluded.raw_asn,
+        raw_asn_name        = excluded.raw_asn_name,
+        ip_used             = excluded.ip_used,
+        stable_country      = excluded.stable_country,
+        stable_city         = excluded.stable_city,
+        stable_asn          = excluded.stable_asn,
+        stable_asn_name     = excluded.stable_asn_name,
+        stable_since        = excluded.stable_since,
+        stable_observations = excluded.stable_observations,
+        cand_country        = excluded.cand_country,
+        cand_city           = excluded.cand_city,
+        cand_asn            = excluded.cand_asn,
+        cand_asn_name       = excluded.cand_asn_name,
+        cand_count          = excluded.cand_count,
+        cand_first_seen     = excluded.cand_first_seen,
+        last_observed_at    = excluded.last_observed_at,
+        last_counted_at     = excluded.last_counted_at,
+        last_present_at     = excluded.last_present_at,
+        missing_streak      = excluded.missing_streak,
+        bootstrap_source    = excluded.bootstrap_source
+    `),
+    listGeoLiveAll: db.prepare(`SELECT * FROM validator_geo_live`),
+    getGeoLive: db.prepare(`SELECT * FROM validator_geo_live WHERE validator_pubkey = ?`),
+
+    getGeoLiveMeta: db.prepare(`SELECT * FROM geo_live_meta WHERE id = 1`),
+    upsertGeoLiveMeta: db.prepare(`
+      INSERT INTO geo_live_meta (
+        id, last_tick_at, epoch,
+        observed_count, with_ip_count, present_count, moving_count, promoted_count, bootstrapped_count,
+        mass_change_pct, city_mmdb_mtime_ms, asn_mmdb_mtime_ms,
+        stable_k, stable_min_dwell_s
+      ) VALUES (
+        1, @last_tick_at, @epoch,
+        @observed_count, @with_ip_count, @present_count, @moving_count, @promoted_count, @bootstrapped_count,
+        @mass_change_pct, @city_mmdb_mtime_ms, @asn_mmdb_mtime_ms,
+        @stable_k, @stable_min_dwell_s
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        last_tick_at       = excluded.last_tick_at,
+        epoch              = excluded.epoch,
+        observed_count     = excluded.observed_count,
+        with_ip_count      = excluded.with_ip_count,
+        present_count      = excluded.present_count,
+        moving_count       = excluded.moving_count,
+        promoted_count     = excluded.promoted_count,
+        bootstrapped_count = excluded.bootstrapped_count,
+        mass_change_pct    = excluded.mass_change_pct,
+        city_mmdb_mtime_ms = excluded.city_mmdb_mtime_ms,
+        asn_mmdb_mtime_ms  = excluded.asn_mmdb_mtime_ms,
+        stable_k           = excluded.stable_k,
+        stable_min_dwell_s = excluded.stable_min_dwell_s
+    `),
+
+    insertGeoEvent: db.prepare(`
+      INSERT INTO validator_geo_events (
+        at, validator_pubkey, kind,
+        from_country, from_city, from_asn,
+        to_country, to_city, to_asn,
+        cand_count, dwell_s, epoch
+      ) VALUES (
+        @at, @validator_pubkey, @kind,
+        @from_country, @from_city, @from_asn,
+        @to_country, @to_city, @to_asn,
+        @cand_count, @dwell_s, @epoch
+      )
+    `),
+    deleteGeoEventsBefore: db.prepare(`DELETE FROM validator_geo_events WHERE at < ?`),
+    /** Promotions in a recent window — the watchdog's mass-change signal.
+     *  Counting EVENTS rather than sampling geo_live_meta.mass_change_pct is
+     *  deliberate: the watchdog runs hourly against a column the pass rewrites
+     *  every 15 min, so sampling it misses ~3 of every 4 spikes. */
+    countGeoPromotesSince: db.prepare(
+      `SELECT COUNT(*) AS n FROM validator_geo_events WHERE kind = 'promote' AND at > ?`,
+    ),
+    /** Newest last_observed_at across the live table. Lets a consumer detect
+     *  row writes that happened AFTER the last freshness stamp — i.e. ticks
+     *  that ran but failed their stamp gate. */
+    maxGeoLiveObservedAt: db.prepare(
+      `SELECT MAX(last_observed_at) AS t FROM validator_geo_live`,
+    ),
+    listGeoEventsForValidator: db.prepare(
+      `SELECT * FROM validator_geo_events WHERE validator_pubkey = ? ORDER BY at, id`,
+    ),
+    countGeoEvents: db.prepare(`SELECT COUNT(*) AS n FROM validator_geo_events`),
 
     upsertGeoOverride: db.prepare(`
       INSERT INTO validator_geo_overrides
@@ -1047,6 +1340,59 @@ export function openStorage(dbPath: string = DEFAULT_DB_PATH, opts: { readonly?:
     },
     listGeoShadowForValidator(pubkey: string): ValidatorGeoShadowRow[] {
       return stmt.listGeoShadowForValidator.all(pubkey) as ValidatorGeoShadowRow[];
+    },
+    /** Newest shadow row per validator (MAX(epoch)) — the live pass's bootstrap
+     *  seed. One row per validator, ~2.6k rows. */
+    listLatestGeoShadow(): ValidatorGeoShadowRow[] {
+      return stmt.listLatestGeoShadow.all() as ValidatorGeoShadowRow[];
+    },
+
+    // ─── Live geo. See src/lib/gdi/geo-live.ts for the state machine that
+    //     owns these tables; nothing else writes them.
+    listGeoLiveAll(): ValidatorGeoLiveRow[] {
+      return stmt.listGeoLiveAll.all() as ValidatorGeoLiveRow[];
+    },
+    getGeoLive(pubkey: string): ValidatorGeoLiveRow | undefined {
+      return stmt.getGeoLive.get(pubkey) as ValidatorGeoLiveRow | undefined;
+    },
+    upsertGeoLiveRow(row: ValidatorGeoLiveRow): void {
+      stmt.upsertGeoLive.run(row);
+    },
+    getGeoLiveMeta(): GeoLiveMetaRow | undefined {
+      return stmt.getGeoLiveMeta.get() as GeoLiveMetaRow | undefined;
+    },
+    upsertGeoLiveMeta(row: Omit<GeoLiveMetaRow, 'id'>): void {
+      stmt.upsertGeoLiveMeta.run(row);
+    },
+    insertGeoEvent(ev: ValidatorGeoEventRow): void {
+      stmt.insertGeoEvent.run(ev);
+    },
+    deleteGeoEventsBefore(unixS: number): number {
+      const r = stmt.deleteGeoEventsBefore.run(unixS) as { changes: number };
+      return r.changes;
+    },
+    listGeoEventsForValidator(pubkey: string): (ValidatorGeoEventRow & { id: number })[] {
+      return stmt.listGeoEventsForValidator.all(pubkey) as (ValidatorGeoEventRow & { id: number })[];
+    },
+    countGeoEvents(): number {
+      return (stmt.countGeoEvents.get() as { n: number }).n;
+    },
+    /** Promotions recorded strictly after `unixS`. */
+    countGeoPromotesSince(unixS: number): number {
+      return (stmt.countGeoPromotesSince.get(unixS) as { n: number }).n;
+    },
+    /** Newest last_observed_at in validator_geo_live, or null when empty. */
+    maxGeoLiveObservedAt(): number | null {
+      const r = stmt.maxGeoLiveObservedAt.get() as { t: number | null };
+      return r?.t ?? null;
+    },
+    /**
+     * Run the whole live-geo tick as ONE transaction — every row update, every
+     * event and the meta stamp land together or not at all. A partial commit
+     * would leave the freshness stamp disagreeing with the rows it describes.
+     */
+    runGeoLiveTransaction(fn: () => void): void {
+      db.transaction(fn)();
     },
 
     upsertGeoOverride(row: ValidatorGeoOverrideRow): void {

@@ -16,8 +16,10 @@
 //      VACUUM INTO reads the source and writes a brand-new, defragmented single
 //      file; it never touches the source (verified: a read-only connection can
 //      run it and the source checksum is unchanged afterwards). No WAL sidecars.
-//   2. Create the view layer inside the .tmp copy (the source is read-only and
-//      must stay pristine — the views only ever live in the snapshot).
+//   2. Drop the tables that must not be published (live geo — see the DROP
+//      block below) and create the view layer, both inside the .tmp copy (the
+//      source is read-only and must stay pristine — the views only ever live
+//      in the snapshot).
 //   3. Run sanity guards against the .tmp copy. On any failure we ABORT: the
 //      .tmp is removed and the previous good snapshot is left in place.
 //   4. Atomically rename .tmp → gdi-snapshot.db (same directory, same fs) and
@@ -200,6 +202,42 @@ export function runSnapshot(opts: SnapshotOptions): SnapshotResult {
     const snap = new Database(tmpPath);
     let result: SnapshotResult;
     try {
+      // 2a. Drop the live-geo tables from the COPY before anything else runs
+      //     against it. This snapshot is published world-readable into the
+      //     public /var/lib/sgdi/published/ tree, and VACUUM INTO copies the
+      //     whole database — so both tables would ship by default:
+      //       validator_geo_live   carries ip_used (the gossip/TPU IP we looked
+      //                            up per validator)
+      //       validator_geo_events would be a per-validator location-transition
+      //                            history — an operator movement log
+      //     geo_live_meta stays: one row of pass-level counters, nothing
+      //     per-validator and nothing sensitive, and it lets a snapshot reader
+      //     tell how fresh the geo behind it is. The source DB is untouched;
+      //     only this copy loses the tables.
+      //
+      //     validator_geo_shadow is KEPT — the frozen per-epoch capture is much
+      //     of the snapshot's value — but its ip_used column is nulled out in
+      //     the copy. That column holds ~32,700 gossip IPs (one per validator
+      //     per epoch, 46 epochs deep): exactly the per-validator IP history
+      //     the paragraph above refuses to publish, except that it has been
+      //     shipping since the shadow pass was written. This closes a
+      //     PRE-EXISTING public exposure, deliberately and with the operator
+      //     informed — to revert, delete the UPDATE line. The source keeps it.
+      //
+      //     The VACUUM is not optional and not a tidiness step: DROP TABLE and
+      //     UPDATE ... = NULL both only unlink or orphan the old pages, they do
+      //     not overwrite them. Verified on a 3,000-row copy — every ip_used
+      //     string was still recoverable from the published file with `grep`
+      //     after the DROP alone. VACUUM rewrites the file from the live
+      //     b-trees, so those pages are gone rather than merely unreferenced.
+      //     It must stay LAST of the three statements.
+      snap.exec(`
+        DROP TABLE IF EXISTS validator_geo_live;
+        DROP TABLE IF EXISTS validator_geo_events;
+        UPDATE validator_geo_shadow SET ip_used = NULL;
+        VACUUM;
+      `);
+
       snap.exec(SNAPSHOT_VIEWS_SQL);
 
       const totalValidators = (snap.prepare('SELECT COUNT(*) AS n FROM validators').get() as { n: number }).n;

@@ -16,6 +16,10 @@
 //   pools/<address>/history.json           full per-epoch trend
 //   validators.json                        validator metadata directory
 //   concentration-crosscheck.json          our computed shares vs Stakewiz's
+//   geo-live.json                          debounced live geo per validator,
+//                                          stamped with the INGEST tick time
+//                                          (skipped entirely until the live
+//                                          pass has completed one tick)
 //
 // Atomic-write pattern: write to temp file next to target, then rename.
 // nginx readers never see a half-written file.
@@ -745,6 +749,112 @@ async function main() {
     cities_top: topN(cityAgg, 25),
     asns_top: topN(asnAgg, 25),
   });
+
+  // 7. geo-live.json — the live (debounced) geo view for the website and for
+  //    third parties. The optimiser reads validator_geo_live from the DB
+  //    directly; this file exists so a JSON-only consumer doesn't need
+  //    better-sqlite3 in its process.
+  //
+  //    computed_at MUST come from geo_live_meta.last_tick_at, NEVER from this
+  //    script's wall clock: gdi-cycle.sh runs publish even when ingest exited
+  //    non-zero, so a publish-derived timestamp would re-stamp a dead ingest as
+  //    fresh — the precise failure mode the freshness stamp exists to expose.
+  //    No meta row at all means the pass has never completed a tick, and we
+  //    publish nothing rather than an empty-but-fresh-looking file.
+  //
+  //    Second guard, on COHERENCE rather than freshness: the pass writes rows
+  //    on EVERY tick but only stamps geo_live_meta on a tick that cleared its
+  //    gate. So after a degraded tick (a partial getClusterNodes return, an
+  //    .mmdb caught mid-rename) the rows have moved on while the stamp has not,
+  //    and publishing then would pair an old, trustworthy computed_at with a
+  //    body that is neither — precisely the lie the stamp exists to prevent, in
+  //    the opposite direction. When rows are newer than the stamp we write
+  //    NOTHING: the previous file stays on disk and ages honestly through its
+  //    own computed_at, which is a state consumers already handle.
+  //
+  //    NOTE: this directory is served publicly (nginx `location /gdi/`), so
+  //    ip_used never appears here. Gossip IPs are public via getClusterNodes,
+  //    but a pre-assembled per-validator IP table is a convenience we don't
+  //    need to hand out.
+  const geoLiveMeta = storage.getGeoLiveMeta();
+  const geoLiveNewestRowAt = geoLiveMeta ? storage.maxGeoLiveObservedAt() : null;
+  if (!geoLiveMeta) {
+    log.info('geo.live.publish.skipped', { reason: 'no geo_live_meta row — the live pass has never completed a tick' });
+  } else if (geoLiveNewestRowAt != null && geoLiveNewestRowAt > geoLiveMeta.last_tick_at) {
+    log.info('geo.live.publish.skipped', {
+      reason: 'unstamped ticks since meta',
+      last_tick_at: geoLiveMeta.last_tick_at,
+      newest_row_observed_at: geoLiveNewestRowAt,
+      detail: 'rows advanced past the last stamped tick; keeping the previous coherent file',
+    });
+  } else {
+    const isoS = (s: number | null): string | null =>
+      s != null ? new Date(s * 1000).toISOString() : null;
+    const isoMs = (ms: number | null): string | null =>
+      ms != null ? new Date(ms).toISOString() : null;
+
+    const geoLiveValidators = storage.listGeoLiveAll()
+      // A row with neither a stable tuple nor a pending candidate has nothing
+      // to say — it is a validator we have seen but never located.
+      .filter((r) =>
+        r.stable_country != null || r.stable_city != null ||
+        r.stable_asn != null || r.stable_asn_name != null ||
+        r.cand_count > 0,
+      )
+      .map((r) => ({
+        vote: r.validator_pubkey,
+        // The STABLE tuple — what money is allowed to read.
+        country: r.stable_country,
+        city: r.stable_city,
+        asn: r.stable_asn,
+        asn_name: r.stable_asn_name,
+        stable_since: isoS(r.stable_since),
+        observations: r.stable_observations,
+        present: r.missing_streak === 0,
+        last_seen: isoS(r.last_present_at),
+        // Present ONLY while a change is pending. A display may render this as
+        // "moving, unconfirmed"; money must not read it.
+        ...(r.cand_count > 0 ? {
+          moving: true,
+          candidate: {
+            country: r.cand_country,
+            city: r.cand_city,
+            asn: r.cand_asn,
+            asn_name: r.cand_asn_name,
+            count: r.cand_count,
+            first_seen: isoS(r.cand_first_seen),
+          },
+        } : {}),
+      }));
+
+    await atomicWriteJson(join(OUTPUT_DIR, 'geo-live.json'), {
+      schema: 'sgdi.geo-live/1',
+      computed_at: isoS(geoLiveMeta.last_tick_at),
+      published_at: new Date().toISOString(),  // debugging only; never freshness
+      epoch: geoLiveMeta.epoch,
+      tick_interval_s: 900,
+      stable_k: geoLiveMeta.stable_k,
+      stable_min_dwell_s: geoLiveMeta.stable_min_dwell_s,
+      mmdb: {
+        city_mtime: isoMs(geoLiveMeta.city_mmdb_mtime_ms),
+        asn_mtime: isoMs(geoLiveMeta.asn_mmdb_mtime_ms),
+      },
+      observed: geoLiveMeta.observed_count,
+      // with_ip is the denominator `present` is meaningful against: most of the
+      // fleet advertises no resolvable gossip endpoint, so present/observed
+      // reads like a fault when nothing is wrong.
+      with_ip: geoLiveMeta.with_ip_count,
+      present: geoLiveMeta.present_count,
+      moving: geoLiveMeta.moving_count,
+      mass_change_pct: geoLiveMeta.mass_change_pct,
+      validators: geoLiveValidators,
+    });
+    log.info('geo.live.published', {
+      validators: geoLiveValidators.length,
+      computed_at: isoS(geoLiveMeta.last_tick_at),
+      moving: geoLiveMeta.moving_count,
+    });
+  }
 
   // ─── PASS B: shadow scoring ─────────────────────────────────────────────
   // Mirror Pass A's outputs, but populated from MERGED geo

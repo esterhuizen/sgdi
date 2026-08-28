@@ -1,6 +1,6 @@
 // SGDI staleness + sanity watchdog.
 //
-// Runs hourly via systemd timer. Three independent check groups:
+// Runs hourly via systemd timer. Four independent check groups:
 //
 //   1. HEARTBEAT — has the gdi-ingest.timer fired in the last
 //      HEARTBEAT_HOURS hours? If not, systemd is broken or the timer was
@@ -20,6 +20,12 @@
 //      Catches upstream data blips (e.g. the 2026-06-10 transient Stakewiz
 //      delinquency flag that briefly inflated BNSOL's GDI by +106%).
 //
+//   4. LIVE-GEO PASS — is the always-on geo tick (src/lib/gdi/geo-live.ts)
+//      actually ticking, and not re-mapping the fleet wholesale? Its whole
+//      purpose is freshness, so a silently-stalled pass is the one failure that
+//      would leave consumers reading a frozen map while believing it live.
+//      Skipped when SGDI_GEO_LIVE_ENABLED=false.
+//
 // Any check failing fires a Telegram alert. Repeat alerts within
 // ALERT_COOLDOWN_H are suppressed so a sustained outage doesn't spam.
 //
@@ -35,7 +41,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { openStorage } from '../src/lib/gdi/storage.ts';
+import { openStorage, type GeoLiveMetaRow, type IngestionRun } from '../src/lib/gdi/storage.ts';
 import { settleWindowState } from '../src/lib/gdi/epoch-gate.ts';
 import { sendSgdiAlert } from '../src/lib/gdi/telegram.ts';
 
@@ -59,6 +65,24 @@ const FLOOR_RARITY_MIN    = Number(process.env.SGDI_WATCHDOG_FLOOR_RARITY_MIN ??
 // legitimate rarity is ~12.9, safely under FLOOR_RARITY_MIN — so the stake
 // gate makes the floor scan false-positive-free.
 const FLOOR_SCAN_MIN_SOL  = Number(process.env.SGDI_WATCHDOG_FLOOR_SCAN_MIN_SOL ?? 1000);
+
+// ── Check 4 (LIVE GEO) thresholds ──
+// The pass runs on every 15-min ingest tick, so 2h is ~8 missed ticks — the
+// same order as the HEARTBEAT bound, and short enough that a stalled pass is
+// caught long before an epoch's worth of stake decisions is priced off it.
+const GEO_STALE_HOURS   = Number(process.env.SGDI_WATCHDOG_GEO_STALE_HOURS ?? 2);
+// Promotions in the last hour, counted from validator_geo_events.
+//
+// Counting EVENTS rather than reading geo_live_meta.mass_change_pct is
+// deliberate: that column is overwritten every 15 minutes and this watchdog
+// runs hourly, so sampling it would miss roughly three of every four spikes —
+// including most of the Wednesday-morning GeoLite2-refresh cluster this check
+// exists to catch. The events table is a complete record over the window.
+//
+// There is no coverage check here. With the stamp gate in geo-live.ts, any
+// geo_live_meta row that exists ALREADY cleared coverage — re-testing it would
+// be dead code by construction.
+const GEO_PROMOTE_ALERT_PER_HOUR = Number(process.env.SGDI_GEO_PROMOTE_ALERT_PER_HOUR ?? 10);
 
 const STATE_DIR  = process.env.SGDI_DATA_DIR ?? '/var/lib/sgdi';
 const STATE_FILE = join(STATE_DIR, 'watchdog.state');
@@ -252,6 +276,98 @@ function runSanityChecks(problems: string[]): void {
   });
 }
 
+type GeoLiveSnapshot = {
+  meta: GeoLiveMetaRow | undefined;
+  promotesLastHour: number;
+};
+
+type DbReads = {
+  recent: IngestionRun[];
+  geoLive: GeoLiveSnapshot | null;   // null when the live-geo pass is switched off
+  error: string | null;
+};
+
+/**
+ * Every DB read this script does, in one guarded place.
+ *
+ * The guard has to wrap the OPEN, not just the queries: openStorage prepares
+ * every statement up front, so a database that predates any table this build
+ * knows about — on a unit whose user cannot write, so the idempotent migration
+ * never runs — throws from `openStorage` itself. Wrapping only the reads leaves
+ * that throw uncaught, which is what this function was written to stop.
+ *
+ * Checks 1 (systemd heartbeat) and 3 (published-JSON sanity) touch no database
+ * at all, so a failure here must not reach them: they are the checks that
+ * matter most precisely when the box is unwell. On failure the caller alerts
+ * about the unreadable DB and the live-geo group degrades to "never run",
+ * which is the honest reading — we cannot show that the pass is healthy.
+ */
+function readDb(nowMs: number, geoLiveEnabled: boolean): DbReads {
+  try {
+    const storage = openStorage(process.env.SGDI_DB_PATH, { readonly: true });
+    try {
+      return {
+        recent: storage.listRecentRuns(20),
+        geoLive: geoLiveEnabled
+          ? {
+              meta: storage.getGeoLiveMeta(),
+              promotesLastHour: storage.countGeoPromotesSince(Math.floor(nowMs / 1000) - 3600),
+            }
+          : null,
+        error: null,
+      };
+    } finally {
+      storage.close();
+    }
+  } catch (e) {
+    const message = (e as Error).message;
+    console.error('watchdog: database read failed:', message);
+    return {
+      recent: [],
+      geoLive: geoLiveEnabled ? { meta: undefined, promotesLastHour: 0 } : null,
+      error: message,
+    };
+  }
+}
+
+/**
+ * Live-geo pass health, from the one-row geo_live_meta stamp plus the promotion
+ * rate from the events log. Every number comes from the tick itself (never from
+ * a publish or from this script's clock), so a stalled writer shows up as an
+ * old `last_tick_at` rather than as a fresh-looking artifact.
+ */
+function runGeoLiveChecks(problems: string[], geo: GeoLiveSnapshot, nowMs: number): void {
+  const { meta, promotesLastHour } = geo;
+  if (!meta) {
+    problems.push(
+      `Live-geo pass has never run — no geo_live_meta row. ` +
+      `Geo consumers are reading the frozen per-epoch capture only. ` +
+      `Check: journalctl -u gdi-ingest --since '2 hours ago' | grep geo.live`,
+    );
+    return;
+  }
+
+  const ageMs = nowMs - meta.last_tick_at * 1000;
+  if (ageMs > GEO_STALE_HOURS * 3_600_000) {
+    problems.push(
+      `Live geo stale — last tick ${fmtAge(ageMs)} ago (threshold ${GEO_STALE_HOURS}h). ` +
+      `The pass runs on every ingest tick, so this means ingest is failing, the pass ` +
+      `is erroring out, or its ticks are failing the stamp gate ` +
+      `(grep geo.live.failed / geo.live.skipped / geo.live.no_coverage).`,
+    );
+  }
+
+  if (promotesLastHour >= GEO_PROMOTE_ALERT_PER_HOUR) {
+    problems.push(
+      `Live geo promoted ${promotesLastHour} validators in the last hour ` +
+      `(threshold ${GEO_PROMOTE_ALERT_PER_HOUR}). The fleet does not relocate together — ` +
+      `suspect a GeoLite2 refresh (city .mmdb mtime ` +
+      `${meta.city_mmdb_mtime_ms != null ? new Date(meta.city_mmdb_mtime_ms).toISOString() : 'unknown'}). ` +
+      `Inspect: SELECT * FROM validator_geo_events WHERE kind='promote' ORDER BY at DESC LIMIT 20;`,
+    );
+  }
+}
+
 async function getTimerLastTriggerMs(): Promise<number | null> {
   try {
     const { stdout } = await exec(
@@ -291,11 +407,18 @@ async function main() {
     }
   }
 
-  // ── Check 2: DATA FRESHNESS
-  const storage = openStorage(process.env.SGDI_DB_PATH, { readonly: true });
-  const recent = storage.listRecentRuns(20);
-  storage.close();
+  // ── Checks 2 + 4 read the DB — one guarded open, one close (see readDb).
+  const geoLiveEnabled = process.env.SGDI_GEO_LIVE_ENABLED !== 'false';
+  const { recent, geoLive, error: dbError } = readDb(now, geoLiveEnabled);
+  if (dbError) {
+    problems.push(
+      `Could not read the GDI database at ${process.env.SGDI_DB_PATH ?? '(default path)'}: ${dbError}. ` +
+      `Freshness and live-geo checks are blind this tick; the heartbeat and published-output ` +
+      `checks below still ran. Check the file's existence, ownership and the unit's User=.`,
+    );
+  }
 
+  // ── Check 2: DATA FRESHNESS
   const lastSuccess = recent.find((r) => r.status === 'success' || r.status === 'partial');
   if (!lastSuccess) {
     problems.push(
@@ -317,6 +440,9 @@ async function main() {
 
   // ── Check 3: PUBLISHED-OUTPUT SANITY (never throws)
   runSanityChecks(problems);
+
+  // ── Check 4: LIVE-GEO PASS (skipped when the pass is switched off)
+  if (geoLive) runGeoLiveChecks(problems, geoLive, now);
 
   if (problems.length === 0) {
     const lastSuccessSummary = lastSuccess

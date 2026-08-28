@@ -1,5 +1,7 @@
 # secrets — never commit (this repo is public)
 /age-identity.txt
+# operator scratch inputs — untracked local material, some of it key-shaped
+/inputs/
 
 # dependencies
 /node_modules

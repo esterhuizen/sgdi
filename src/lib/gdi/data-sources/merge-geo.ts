@@ -163,7 +163,7 @@ export function canonicalCountry(s: string | null): string | null {
 }
 
 /** "24940" → "AS24940", "AS24940" → "AS24940", "as0" → "AS0", "" → null. */
-function canonicalAsn(s: string | null): string | null {
+export function canonicalAsn(s: string | null): string | null {
   if (!isPresent(s)) return null;
   const stripped = s.trim().replace(/^AS/i, '');
   if (stripped.length === 0) return null;
@@ -171,7 +171,7 @@ function canonicalAsn(s: string | null): string | null {
 }
 
 /** asn_name passes through unchanged — no single canonical format. */
-function canonicalPassthrough(s: string | null): string | null {
+export function canonicalPassthrough(s: string | null): string | null {
   return isPresent(s) ? s.trim() : null;
 }
 

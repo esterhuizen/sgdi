@@ -44,6 +44,7 @@ import { createDoubleZero } from '../src/lib/gdi/data-sources/doublezero.ts';
 import { createBam } from '../src/lib/gdi/data-sources/bam.ts';
 import { createJupiter, buildMintNameMap } from '../src/lib/gdi/data-sources/jupiter.ts';
 import { enrichValidators } from '../src/lib/gdi/enrichment.ts';
+import { runLiveGeoPass } from '../src/lib/gdi/geo-live.ts';
 import { shouldRefreshEpoch } from '../src/lib/gdi/epoch-gate.ts';
 import {
   computePoolScores,
@@ -179,6 +180,26 @@ async function main() {
       });
       storage.upsertValidators(refreshed);
       log.info('validators.refreshed', { count: refreshed.length, mode });
+
+      // Live-geo pass. This is THE post-settle geo tick: once the epoch has
+      // settled the full pipeline (and with it step 8b) never runs again, so
+      // without this call nothing looks at the gossip IPs we just fetched for
+      // the remaining ~40h of the epoch — the freeze the StakeCraft incident
+      // rode. Placed inside refreshValidatorMetadata so the pool-discovery
+      // fallback caller is covered too. Own try/catch: a geo failure must not
+      // masquerade as a metadata-refresh failure, and must never fail the run.
+      try {
+        await runLiveGeoPass({
+          storage,
+          validators: refreshed,
+          clusterNodes: clusterNodesData,
+          now: nowSeconds(),
+          epoch,
+          log: logger.forModule('geo-live'),
+        });
+      } catch (e) {
+        log.warn('geo.live.failed', { epoch, mode, error: errMessage(e) });
+      }
     } catch (e) {
       log.warn('validators.refresh.failed', { error: errMessage(e) });
     }
@@ -461,6 +482,29 @@ async function main() {
   });
   storage.upsertValidators(enriched);
   log.info('enrichment.upserted', { count: enriched.length });
+
+  // 5b. Live-geo pass — the always-on, flap-suppressed counterpart to 8b's
+  //     per-epoch photograph. Runs here as well as on the settled skip path so
+  //     the debouncer sees every tick, not only the settled ones.
+  //
+  //     No single run reaches both call sites as the code stands: every path
+  //     that calls refreshValidatorMetadata() returns immediately afterwards.
+  //     The counting guard in geo-live.ts nonetheless makes a double invocation
+  //     within one run harmless — the second observation refreshes raw_*
+  //     without counting — which is cheap insurance against that control flow
+  //     changing. Best-effort: a failure here can't tank the ingest run.
+  try {
+    await runLiveGeoPass({
+      storage,
+      validators: enriched,
+      clusterNodes: clusterNodesData,
+      now: nowSeconds(),
+      epoch,
+      log: logger.forModule('geo-live'),
+    });
+  } catch (e) {
+    log.warn('geo.live.failed', { epoch, mode: 'full', error: errMessage(e) });
+  }
 
   // 6. Network shares — computed once from the full Stakewiz validator set
   //    and reused for every pool score + the baseline. The "rarity" reference.
