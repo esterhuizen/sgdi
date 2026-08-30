@@ -22,8 +22,27 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { runSnapshot } from '../scripts/gdi-snapshot.ts';
-import { openStorage, type ValidatorGeoShadowRow } from '../src/lib/gdi/storage.ts';
-import { runLiveGeoPass, type LiveGeoPassResult } from '../src/lib/gdi/geo-live.ts';
+import {
+  openStorage,
+  type GeoLiveMetaRow,
+  type ValidatorGeoLiveRow,
+  type ValidatorGeoShadowRow,
+} from '../src/lib/gdi/storage.ts';
+import {
+  buildShadowRow,
+  planFrozenBase,
+  runLiveGeoPass,
+  selectFrozenBase,
+  type FrozenBasePlan,
+  type LiveGeoPassResult,
+} from '../src/lib/gdi/geo-live.ts';
+import {
+  canonicalAsn,
+  canonicalCity,
+  canonicalCountry,
+  canonicalPassthrough,
+  mergeGeo,
+} from '../src/lib/gdi/data-sources/merge-geo.ts';
 import type { GeoLookup, LocalGeoipResult } from '../src/lib/gdi/data-sources/local-geoip.ts';
 import type { ModuleLogger } from '../src/lib/gdi/logger.ts';
 
@@ -817,4 +836,498 @@ test('geo-live.json: rows newer than the stamp keep the previous file in place',
     readFileSync(join(out, 'geo-live.json'), 'utf8'), first,
     'the file must be left exactly as it was, ageing honestly through its own computed_at',
   );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// S2 — the frozen photograph reads the STABLE view
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// gdi-ingest step 8b now photographs the debounced stable tuple rather than an
+// instantaneous MaxMind lookup. buildShadowRow IS 8b's per-validator write
+// path — the ingest loop and these tests call the same function, so there is no
+// mirror to drift.
+
+const HOUR = 3600;
+const DAY = 86_400;
+
+/** A geo_live_meta row stamped at `at`. Only last_tick_at is load-bearing. */
+function metaAt(at: number): GeoLiveMetaRow {
+  return {
+    id: 1, last_tick_at: at, epoch: EPOCH,
+    observed_count: 2656, with_ip_count: 689, present_count: 689,
+    moving_count: 1, promoted_count: 0, bootstrapped_count: 0, mass_change_pct: 0,
+    city_mmdb_mtime_ms: CITY_MTIME_MS, asn_mmdb_mtime_ms: ASN_MTIME_MS,
+    stable_k: 6, stable_min_dwell_s: 3600,
+  };
+}
+
+/** A live row with a settled, well-corroborated Hong Kong stable tuple. */
+function liveRow(over: Partial<ValidatorGeoLiveRow> = {}): ValidatorGeoLiveRow {
+  return {
+    validator_pubkey: V1,
+    raw_country: 'Hong Kong', raw_city: 'Hong Kong', raw_asn: 'AS46873', raw_asn_name: 'Host Color',
+    ip_used: IP_HK,
+    stable_country: 'Hong Kong', stable_city: 'Hong Kong', stable_asn: 'AS46873', stable_asn_name: 'Host Color',
+    stable_since: T0 - 30 * DAY, stable_observations: 1180,
+    cand_country: null, cand_city: null, cand_asn: null, cand_asn_name: null,
+    cand_count: 0, cand_first_seen: null,
+    first_observed_at: T0 - 60 * DAY, last_observed_at: T0, last_counted_at: T0,
+    last_present_at: T0, missing_streak: 0, bootstrap_source: 'shadow-seed',
+    ...over,
+  };
+}
+
+/** The healthy run-level plan, computed through the real function. */
+const healthyPlan = (): FrozenBasePlan => planFrozenBase(metaAt(T0 - 60), T0);
+
+/** Run `fn` with SGDI_GEO_FROZEN_FROM_STABLE set to `value`. */
+function withFrozenFlag<T>(value: string | undefined, fn: () => T): T {
+  const prev = process.env.SGDI_GEO_FROZEN_FROM_STABLE;
+  if (value === undefined) delete process.env.SGDI_GEO_FROZEN_FROM_STABLE;
+  else process.env.SGDI_GEO_FROZEN_FROM_STABLE = value;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.SGDI_GEO_FROZEN_FROM_STABLE;
+    else process.env.SGDI_GEO_FROZEN_FROM_STABLE = prev;
+  }
+}
+
+/** 8b's write path for one validator, with test-friendly defaults. */
+function build(over: {
+  plan?: FrozenBasePlan;
+  liveRow?: ValidatorGeoLiveRow;
+  lookup?: GeoLookup;
+  ip?: string | null;
+  override?: Parameters<typeof buildShadowRow>[0]['override'];
+  now?: number;
+  canonical?: { country: string | null; city: string | null; asn: string | null; asn_name?: string | null };
+} = {}) {
+  const canonical = over.canonical ?? { country: 'Hong Kong', city: 'Hong Kong', asn: 'AS46873' };
+  return buildShadowRow({
+    plan: over.plan ?? healthyPlan(),
+    epoch: EPOCH,
+    validator: {
+      validator_pubkey: V1,
+      country: canonical.country, city: canonical.city, asn: canonical.asn,
+      asn_name: canonical.asn_name ?? 'Host Color',
+    },
+    liveRow: over.liveRow,
+    lookup: over.lookup ?? EMPTY,
+    ip: over.ip ?? null,
+    override: over.override ?? null,
+    now: over.now ?? T0,
+    computedAt: T0,
+  });
+}
+
+// ── 19. Run-level eligibility ──────────────────────────────────────────────
+
+test('run gate: no live stamp at all → the whole run stays instantaneous', () => {
+  const plan = planFrozenBase(undefined, T0);
+  assert.equal(plan.useStable, false);
+  assert.equal(plan.reason, 'no_meta');
+
+  const sel = selectFrozenBase({ plan, row: liveRow(), lookup: DE, now: T0 });
+  assert.equal(sel.source, 'instantaneous');
+  assert.equal(sel.fallbackReason, 'run_gate');
+  assert.deepEqual(sel.base, DE, 'an eligible row cannot rescue a run-level "no"');
+});
+
+test('run gate: a stale live stamp → instantaneous (this is what makes the kill switch inert)', () => {
+  const justInside = planFrozenBase(metaAt(T0 - 2 * HOUR), T0);
+  assert.equal(justInside.useStable, true, '2h exactly is still trusted');
+
+  const plan = planFrozenBase(metaAt(T0 - 2 * HOUR - 1), T0);
+  assert.equal(plan.useStable, false);
+  assert.equal(plan.reason, 'stale_meta');
+  assert.equal(plan.metaAgeS, 2 * HOUR + 1);
+  assert.equal(plan.maxAgeS, 7200);
+
+  assert.equal(selectFrozenBase({ plan, row: liveRow(), lookup: DE, now: T0 }).source, 'instantaneous');
+});
+
+test('run gate: a stamp from the FUTURE fails the gate (clock step / restored DB)', () => {
+  // Negative age is not "very fresh", it is unexplained — and unexplained is
+  // not a state in which to freeze a value for a whole epoch.
+  const plan = planFrozenBase(metaAt(T0 + 60), T0);
+  assert.equal(plan.useStable, false);
+  assert.equal(plan.reason, 'stale_meta');
+  assert.equal(plan.metaAgeS, -60);
+  assert.equal(selectFrozenBase({ plan, row: liveRow(), lookup: DE, now: T0 }).source, 'instantaneous');
+});
+
+test('run gate: SGDI_GEO_FROZEN_FROM_STABLE=false reverts the BASE SELECTION only', () => {
+  withFrozenFlag('false', () => {
+    const plan = planFrozenBase(metaAt(T0), T0);
+    assert.equal(plan.useStable, false);
+    assert.equal(plan.reason, 'flag_disabled');
+
+    // The base reverts to the instantaneous lookup…
+    const { row, evidence } = build({ plan, liveRow: liveRow(), lookup: HK, ip: IP_HK });
+    assert.equal(evidence.source, 'instantaneous');
+    assert.equal(evidence.fallbackReason, 'run_gate');
+    assert.equal(row.ip_used, IP_HK);
+
+    // …but the canonicalisation is NOT gated, by design: it is shape-only and
+    // idempotent through mergeGeo, and gating it would leave one epoch's table
+    // holding a mix of raw and canonical shapes.
+    assert.equal(row.shadow_country, 'Hong Kong', 'still canonical, not "HK"');
+    assert.equal(row.shadow_asn, 'AS46873', 'still canonical, not "46873"');
+    assert.equal(row.country_match, 1, 'match flags still compare canonical to canonical');
+  });
+
+  // Any other value, including a typo, leaves the default in force. A rollback
+  // switch a typo could turn ON is not a rollback switch.
+  withFrozenFlag('flase', () => assert.equal(planFrozenBase(metaAt(T0), T0).useStable, true));
+  withFrozenFlag('', () => assert.equal(planFrozenBase(metaAt(T0), T0).useStable, true));
+  withFrozenFlag(undefined, () => assert.equal(planFrozenBase(metaAt(T0), T0).useStable, true));
+});
+
+// ── 20. Row-level eligibility ──────────────────────────────────────────────
+
+test('row gate: a healthy corroborated row is photographed from its stable tuple', () => {
+  // The instantaneous lookup says Frankfurt; the stable tuple says Hong Kong.
+  const sel = selectFrozenBase({ plan: healthyPlan(), row: liveRow(), lookup: DE, now: T0 });
+  assert.equal(sel.source, 'stable');
+  assert.equal(sel.fallbackReason, 'ok');
+  assert.deepEqual(sel.base, { country: 'Hong Kong', city: 'Hong Kong', asn: 'AS46873', asn_org: 'Host Color' });
+  assert.equal(sel.stableIp, IP_HK);
+});
+
+test('row gate: no live row yet → instantaneous', () => {
+  const sel = selectFrozenBase({ plan: healthyPlan(), row: undefined, lookup: DE, now: T0 });
+  assert.equal(sel.source, 'instantaneous');
+  assert.equal(sel.fallbackReason, 'no_row');
+  assert.deepEqual(sel.base, DE);
+});
+
+test('row gate: a stable tuple that places the validator nowhere → instantaneous', () => {
+  // The usability predicate is the pass's own definition of "located": a city
+  // or an org name alone puts a validator in no scored bucket.
+  const allNull = selectFrozenBase({
+    plan: healthyPlan(),
+    row: liveRow({ stable_country: null, stable_city: null, stable_asn: null, stable_asn_name: null }),
+    lookup: HK, now: T0,
+  });
+  assert.equal(allNull.fallbackReason, 'no_stable', 'the transient first-tick state is never frozen in');
+
+  const cityOnly = selectFrozenBase({
+    plan: healthyPlan(),
+    row: liveRow({ stable_country: null, stable_asn: null, stable_city: 'Hong Kong', stable_asn_name: 'Host Color' }),
+    lookup: HK, now: T0,
+  });
+  assert.equal(cityOnly.fallbackReason, 'no_stable', 'city + org name alone is not a location');
+  assert.deepEqual(cityOnly.base, HK);
+
+  // Either scored dimension alone IS enough.
+  const asnOnly = selectFrozenBase({
+    plan: healthyPlan(),
+    row: liveRow({ stable_country: null, stable_city: null }),
+    lookup: HK, now: T0,
+  });
+  assert.equal(asnOnly.source, 'stable');
+});
+
+test('row gate: absent from gossip beyond the row age bound → instantaneous', () => {
+  const plan = healthyPlan();
+  const justInside = selectFrozenBase({
+    plan, row: liveRow({ last_present_at: T0 - 2 * DAY }), lookup: EMPTY, now: T0,
+  });
+  assert.equal(justInside.source, 'stable', '2 days exactly is still trusted');
+
+  const stale = selectFrozenBase({
+    plan, row: liveRow({ last_present_at: T0 - 2 * DAY - 1 }), lookup: EMPTY, now: T0,
+  });
+  assert.equal(stale.fallbackReason, 'absent');
+  // Which yields EMPTY — precisely what the photograph recorded for an
+  // unreachable validator before S2. Never worse than today.
+  assert.deepEqual(stale.base, EMPTY);
+
+  const neverPresent = selectFrozenBase({
+    plan, row: liveRow({ last_present_at: null }), lookup: EMPTY, now: T0,
+  });
+  assert.equal(neverPresent.fallbackReason, 'absent');
+
+  // A last_present_at in the FUTURE is unexplained, not fresh.
+  const future = selectFrozenBase({
+    plan, row: liveRow({ last_present_at: T0 + 60 }), lookup: EMPTY, now: T0,
+  });
+  assert.equal(future.fallbackReason, 'absent');
+});
+
+// ── 21. The laundering loop — an uncorroborated seed is not evidence ────────
+
+test('row gate: a shadow-seeded stable with ZERO observations is not trusted', () => {
+  // A row bootstrapped from validator_geo_shadow carries stable_observations=0:
+  // its "stable" tuple is an IMPORT of the previous epoch's instantaneous
+  // photograph, believed by nobody. Photographing it back out would launder it
+  // into a second epoch under the name "stable".
+  const seeded = liveRow({ stable_observations: 0, bootstrap_source: 'shadow-seed' });
+  const sel = selectFrozenBase({ plan: healthyPlan(), row: seeded, lookup: DE, now: T0 });
+  assert.equal(sel.source, 'instantaneous', 'fresh and present, but uncorroborated');
+  assert.equal(sel.fallbackReason, 'uncorroborated');
+  assert.deepEqual(sel.base, DE);
+});
+
+test('row gate: one corroborating observation is enough (first-observation bootstrap)', () => {
+  const bootstrapped = liveRow({ stable_observations: 1, bootstrap_source: 'first-observation' });
+  const sel = selectFrozenBase({ plan: healthyPlan(), row: bootstrapped, lookup: DE, now: T0 });
+  assert.equal(sel.source, 'stable', 'this tuple came from an observation the pass actually made');
+  assert.equal(sel.observations, 1);
+});
+
+test('row gate: a promoted tuple carries its K observations and is trusted', () => {
+  const promoted = liveRow({ stable_observations: 6, stable_since: T0 - HOUR, bootstrap_source: 'shadow-seed' });
+  const sel = selectFrozenBase({ plan: healthyPlan(), row: promoted, lookup: DE, now: T0 });
+  assert.equal(sel.source, 'stable');
+  assert.equal(sel.observations, 6);
+});
+
+test('THE LAUNDERING LOOP, closed: a flap seeded from last epoch is not re-frozen', async () => {
+  // Reproduce the production state exactly: epoch N's photograph froze the
+  // Frankfurt flap; the live pass then bootstraps from that shadow row, so the
+  // live table's "stable" tuple IS the flap, with observations = 0. Without the
+  // corroboration gate, epoch N+1 would photograph it straight back out.
+  const storage = openStorage(':memory:');
+  seedShadow(storage, V1, EPOCH, DE);          // the poisoned frozen capture
+  // Bootstrap the live row from it, with no corroborating observation at all
+  // (the validator is not in gossip on this tick).
+  await tick(storage, { now: T0, ips: { [ID1]: null }, lookups: {} });
+
+  const row = storage.getGeoLive(V1)!;
+  assert.equal(row.bootstrap_source, 'shadow-seed');
+  assert.equal(row.stable_country, 'Germany', 'the seed really is the flap value');
+  assert.equal(row.stable_observations, 0, 'and nothing corroborates it');
+
+  // Epoch N+1's settle-window tick, with the validator back on its real IP.
+  const { row: shadow, evidence } = build({
+    liveRow: row, lookup: HK, ip: IP_HK,
+    canonical: { country: 'Hong Kong', city: 'Hong Kong', asn: 'AS46873' },
+  });
+  assert.equal(evidence.fallbackReason, 'uncorroborated');
+  assert.equal(shadow.shadow_country, 'Hong Kong', 'the flap is NOT laundered into a second epoch');
+  assert.equal(shadow.ip_used, IP_HK);
+  storage.close();
+});
+
+// ── 22. THE ROOT-CAUSE TEST ────────────────────────────────────────────────
+
+test('THE INCIDENT, closed: a mid-settle flap cannot be photographed', async () => {
+  // Drive the REAL state machine into the exact state of 2026-08-26: a
+  // long-settled Hong Kong validator whose gossip IP has just flapped to
+  // Frankfurt, with the candidate still well short of K.
+  const storage = openStorage(':memory:');
+  const lookups = { [IP_HK]: HK, [IP_DE]: DE };
+  await tick(storage, { now: T0, ips: { [ID1]: IP_HK }, lookups });          // corroborates HK
+  await tick(storage, { now: T0 + TICK, ips: { [ID1]: IP_DE }, lookups });   // the flap
+
+  const live = storage.getGeoLive(V1)!;
+  assert.equal(live.cand_count, 1, 'a flap in progress, nowhere near K');
+  assert.equal(live.stable_observations, 1, 'the stable tuple IS corroborated');
+  assert.equal(live.raw_country, 'Germany', 'the instantaneous truth right now IS Frankfurt');
+
+  // Now the settle-window ingest tick lands — the coincidence that caused the
+  // incident. Before S2 this photographed geoip.lookup(IP_DE) = Frankfurt and
+  // froze it for ~46 hours.
+  const { row, evidence } = build({
+    liveRow: live, lookup: DE, ip: IP_DE, now: T0 + TICK,
+    canonical: { country: 'Hong Kong', city: 'Hong Kong', asn: 'AS46873' },
+  });
+
+  assert.equal(row.shadow_country, 'Hong Kong', 'the epoch is photographed as Hong Kong');
+  assert.equal(row.shadow_asn, 'AS46873');
+  // The live row's ip_used has already moved to the flapping address, so no
+  // recorded address corroborates the recorded geo. Recording the Frankfurt IP
+  // beside "Hong Kong" would be a row that disproves itself on inspection.
+  assert.equal(row.ip_used, null, 'no IP is recorded rather than a contradictory one');
+
+  // The divergence is recorded as evidence, not hidden.
+  assert.equal(evidence.suppressedFlap, true);
+  assert.equal(evidence.rawPresent, true);
+  assert.equal(evidence.candCount, 1);
+  assert.equal(evidence.raw.country, 'Germany');
+  assert.equal(evidence.rawIp, IP_DE, 'the passed-over address goes in the log line');
+  storage.close();
+});
+
+// ── 23. The evidence predicate ─────────────────────────────────────────────
+
+test('evidence: a settled row with a matching lookup reports no suppressed flap', () => {
+  const { row, evidence } = build({ liveRow: liveRow(), lookup: HK, ip: IP_HK });
+  assert.equal(evidence.source, 'stable');
+  assert.equal(evidence.suppressedFlap, false, 'no divergence to reconcile on a quiet row');
+  assert.equal(row.ip_used, IP_HK, 'and the corroborating address is recorded');
+});
+
+test('evidence: freezing a tuple while the lookup is EMPTY IS a divergence', () => {
+  // The predicate compares against the instantaneous lookup 8b is passing over,
+  // NOT against the live row's raw_* — which is the last PRESENT observation
+  // and is stale exactly when the validator is absent. Comparing raw_* would
+  // hide this whole class instead of reporting it.
+  const { row, evidence } = build({
+    liveRow: liveRow({ last_present_at: T0 - HOUR }), lookup: EMPTY, ip: null,
+  });
+  assert.equal(evidence.source, 'stable');
+  assert.equal(evidence.suppressedFlap, true, 'a stable tuple was frozen over an empty lookup');
+  assert.equal(evidence.rawPresent, false, 'and the line says which kind of divergence it is');
+  assert.equal(row.shadow_country, 'Hong Kong');
+  assert.equal(row.ip_used, null);
+});
+
+test('evidence: org-name churn alone is not a suppressed flap', () => {
+  // asn_name is excluded from the predicate: registry renames move no bucket
+  // and must not fill the journal with reconciliation lines.
+  const { evidence } = build({
+    liveRow: liveRow(),
+    lookup: { country: 'HK', city: 'Hong Kong', asn: '46873', asn_org: 'Host Color Ltd.' },
+    ip: IP_HK,
+  });
+  assert.equal(evidence.source, 'stable');
+  assert.equal(evidence.suppressedFlap, false, 'the three scored dimensions all agree');
+});
+
+test('evidence: an instantaneous row never reports a suppressed flap', () => {
+  const { evidence } = build({ plan: planFrozenBase(undefined, T0), lookup: DE, ip: IP_DE });
+  assert.equal(evidence.source, 'instantaneous');
+  assert.equal(evidence.suppressedFlap, false, 'nothing was suppressed — the lookup IS what was recorded');
+});
+
+// ── 24. The 8b write path ──────────────────────────────────────────────────
+
+test('8b writes canonical shapes, and the HK cosmetic mismatch is gone', () => {
+  // 12 rows at epoch 1023 read country_match=0 purely because the old local
+  // expandIso2 produced Intl's "Hong Kong SAR China", which never equalled
+  // canonical's "Hong Kong". canonicalCountry applies COUNTRY_NAME_OVERRIDES.
+  const { row } = build({ liveRow: liveRow(), lookup: DE, ip: IP_DE });
+
+  assert.equal(row.shadow_country, 'Hong Kong', 'not "HK"');
+  assert.equal(row.shadow_asn, 'AS46873', 'not "46873"');
+  assert.equal(row.shadow_city, 'Hong Kong');
+  assert.equal(row.shadow_asn_name, 'Host Color');
+  assert.equal(row.country_match, 1, 'the cosmetic mismatch is fixed');
+  assert.equal(row.city_match, 1);
+  assert.equal(row.asn_match, 1);
+  assert.equal(row.epoch, EPOCH);
+  assert.equal(row.computed_at, T0);
+  assert.equal(row.canonical_country, 'Hong Kong', 'the canonical side is snapshotted verbatim');
+});
+
+test('8b: the instantaneous fallback canonicalises identically to the stable path', () => {
+  // A fallback run must not produce differently-shaped rows, or the artifact's
+  // format would depend on the live pass's health.
+  const viaStable = build({ liveRow: liveRow(), lookup: EMPTY, ip: null });
+  const viaInstantaneous = build({ plan: planFrozenBase(undefined, T0), lookup: HK, ip: IP_HK });
+
+  assert.equal(viaInstantaneous.evidence.source, 'instantaneous');
+  assert.equal(viaStable.row.shadow_country, viaInstantaneous.row.shadow_country);
+  assert.equal(viaStable.row.shadow_city, viaInstantaneous.row.shadow_city);
+  assert.equal(viaStable.row.shadow_asn, viaInstantaneous.row.shadow_asn);
+  assert.equal(viaStable.row.shadow_asn_name, viaInstantaneous.row.shadow_asn_name);
+  assert.equal(viaInstantaneous.row.country_match, 1);
+  assert.equal(viaInstantaneous.row.asn_match, 1);
+});
+
+test('8b: operator overrides still win, per dimension, and are canonicalised too', () => {
+  const { row } = build({
+    liveRow: liveRow(), lookup: DE, ip: IP_DE,
+    // Partial override: country only. City/ASN must still come from the base.
+    override: {
+      validator_pubkey: V1, country: 'PL', city: null, asn: null, asn_name: null,
+      reason: 'operator-confirmed', source_evidence: null, added_at: T0, added_by: 'test',
+    },
+    canonical: { country: 'Poland', city: 'Hong Kong', asn: 'AS46873' },
+  });
+  assert.equal(row.shadow_country, 'Poland', 'override wins, and is canonicalised like any other source');
+  assert.equal(row.shadow_city, 'Hong Kong', 'the un-overridden dimensions still come from the stable base');
+  assert.equal(row.shadow_asn, 'AS46873');
+  assert.equal(row.country_match, 1);
+});
+
+test('8b: a validator MaxMind cannot place at all still writes a row', () => {
+  const { row, evidence } = build({
+    plan: planFrozenBase(undefined, T0), lookup: EMPTY, ip: null,
+    canonical: { country: 'Germany', city: 'Frankfurt am Main', asn: 'AS24940' },
+  });
+  assert.equal(evidence.source, 'instantaneous');
+  assert.equal(row.shadow_country, null);
+  assert.equal(row.ip_used, null);
+  // Null on one side means the flag is null, not 0 — "we cannot call it".
+  assert.equal(row.country_match, null);
+  assert.equal(row.city_match, null);
+  assert.equal(row.asn_match, null);
+  assert.equal(row.canonical_country, 'Germany', 'the canonical side is still recorded');
+});
+
+// ── 25. The shape change is safe for mergeGeo consumers ────────────────────
+
+test('canonicalisation is idempotent, so re-canonicalising a stored row is a no-op', () => {
+  // Every consumer of validator_geo_shadow feeds these strings straight into
+  // mergeGeo, which canonicalises again. S2 changes the stored shapes, so that
+  // second pass must be a no-op for all four dimensions.
+  const once = {
+    country: canonicalCountry('HK'),
+    city: canonicalCity('Sao Paulo'),
+    asn: canonicalAsn('46873'),
+    asn_name: canonicalPassthrough('  Host Color  '),
+  };
+  assert.deepEqual(once, {
+    country: 'Hong Kong', city: 'São Paulo', asn: 'AS46873', asn_name: 'Host Color',
+  });
+  assert.deepEqual({
+    country: canonicalCountry(once.country),
+    city: canonicalCity(once.city),
+    asn: canonicalAsn(once.asn),
+    asn_name: canonicalPassthrough(once.asn_name),
+  }, once, 'a second canonicalisation must change nothing');
+
+  // And through mergeGeo itself, which is how consumers actually reach it.
+  const merged = mergeGeo({ maxmind: { country: 'Hong Kong', city: 'Hong Kong', asn: 'AS46873', asn_org: 'Host Color' } });
+  assert.equal(merged.country, 'Hong Kong');
+  assert.equal(merged.asn, 'AS46873');
+  assert.equal(merged.sources.country, 'maxmind');
+});
+
+// ── 26. The kill-switch chain, end to end ──────────────────────────────────
+
+test('disabling the LIVE pass reverts the FROZEN base on its own, within the age bound', async () => {
+  // The operational claim S2 rests on: there is one switch, not two. Turning
+  // off SGDI_GEO_LIVE_ENABLED stops geo_live_meta advancing, and the run-level
+  // age bound then reverts 8b's BASE to its pre-S2 source without anyone
+  // touching SGDI_GEO_FROZEN_FROM_STABLE or redeploying.
+  const storage = openStorage(':memory:');
+  const validators = fleet(600);
+  const ips = ipsFor(validators, () => IP_HK);
+  const lookups = { [IP_HK]: HK };
+
+  await tick(storage, { now: T0, validators, ips, lookups });
+  assert.equal(storage.getGeoLiveMeta()!.last_tick_at, T0);
+  assert.equal(planFrozenBase(storage.getGeoLiveMeta(), T0).useStable, true);
+
+  const prev = process.env.SGDI_GEO_LIVE_ENABLED;
+  process.env.SGDI_GEO_LIVE_ENABLED = 'false';
+  try {
+    for (let i = 1; i <= 12; i++) {
+      const r = await tick(storage, { now: T0 + i * TICK, validators, ips, lookups });
+      assert.equal(r.skipped, 'disabled');
+    }
+  } finally {
+    if (prev === undefined) delete process.env.SGDI_GEO_LIVE_ENABLED;
+    else process.env.SGDI_GEO_LIVE_ENABLED = prev;
+  }
+  assert.equal(storage.getGeoLiveMeta()!.last_tick_at, T0, 'the stamp is frozen at the last healthy tick');
+
+  // Inside the bound the photograph still trusts the (still-valid) stable view.
+  assert.equal(planFrozenBase(storage.getGeoLiveMeta(), T0 + 2 * HOUR).useStable, true);
+
+  // Past it, the base reverts to instantaneous lookups by itself.
+  const reverted = planFrozenBase(storage.getGeoLiveMeta(), T0 + 2 * HOUR + 1);
+  assert.equal(reverted.useStable, false);
+  assert.equal(reverted.reason, 'stale_meta');
+  const sel = selectFrozenBase({
+    plan: reverted, row: storage.getGeoLive('Vote_0')!, lookup: DE, now: T0 + 2 * HOUR + 1,
+  });
+  assert.equal(sel.source, 'instantaneous');
+  assert.deepEqual(sel.base, DE, 'exactly the pre-S2 base');
+  storage.close();
 });

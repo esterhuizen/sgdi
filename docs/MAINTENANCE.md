@@ -105,8 +105,9 @@ unchanged by the consolidation.
 
 **Rollback net (kept until ~epoch 987):** the `*_shadow` tables still get
 written by Pass B each cycle, the frozen `published-shadow/` tree remains
-on disk, and `validator_geo_shadow` (raw maxmind + canonical snapshots)
-keeps flowing from ingest. To revert serving to the pre-consolidation
+on disk, and `validator_geo_shadow` (the per-epoch geo photograph +
+canonical snapshots — see "Two-speed geo" below for what it photographs
+since S2) keeps flowing from ingest. To revert serving to the pre-consolidation
 shadow tree: remove `gdi-ingest.service.d/consolidate.conf`, restore the
 `sgdi.service` shadow drop-in + the nginx `@gdi_canonical` fallthrough.
 
@@ -244,6 +245,97 @@ field-aware normalisation. The publish pipeline intentionally omits
 the logger to avoid drowning the journal in ~hundreds of warns per
 ingest cycle; for ad-hoc investigation, run `bin/geo-shadow-report.mjs`
 which surfaces aggregates instead.
+
+## Two-speed geo (S1 + S2)
+
+Geo now moves at two speeds, and the distinction is the whole design:
+
+| | Where | Cadence | What it is |
+|---|---|---|---|
+| **Live** | `validator_geo_live` + `geo_live_meta` + `validator_geo_events`, written by `src/lib/gdi/geo-live.ts` | every ingest tick (~15 min), on the full path AND the settled skip path | Current state, flap-suppressed. `stable_*` is the debounced tuple; `raw_*` is the last observation. Published (without IPs) as `geo-live.json`. |
+| **Frozen** | `validator_geo_shadow`, written by ingest step 8b | once per epoch, inside the settle window, then immutable | The per-epoch photograph the leaderboard is scored from. |
+
+**What the photograph is a photo OF (S2).** 8b's base is the live pass's
+**stable tuple**, not an instantaneous MaxMind lookup. That is what closes
+the 2026-08-26 StakeCraft incident: a gossip-IP flap landing inside the
+settle window can no longer become the epoch's truth. 8b falls back to the
+instantaneous lookup — i.e. pre-S2 behaviour — whenever the stable tuple is
+not clearly better; the reasons are enumerated in `selectFrozenBase`, and
+the most important is `uncorroborated` (a live row bootstrapped from a
+shadow row carries `stable_observations = 0`; photographing it back out
+would launder the previous epoch's instantaneous value into a second epoch
+under the name "stable").
+
+**Stored shapes changed with S2.** `shadow_*` now holds **canonical** forms
+(`"Hong Kong"`, `"AS46873"`) rather than raw MaxMind ones (`"HK"`,
+`"46873"`), and the `*_match` flags compare canonical against canonical.
+This fixed a long-standing false mismatch — the old local `expandIso2`
+produced Intl's `"Hong Kong SAR China"`, which never equalled canonical's
+`"Hong Kong"`, so every HK validator read `country_match = 0` for its whole
+history (12 rows at epoch 1023). Consumers are unaffected: they all feed
+these strings into `mergeGeo`, whose canonicalisation is idempotent.
+
+### Env knobs
+
+| Var | Default | Effect |
+|---|---|---|
+| `SGDI_GEO_LIVE_ENABLED` | `true` | `false` disables the live pass entirely. |
+| `SGDI_GEO_STABLE_K` | `6` | Agreeing observations before a move is believed (~90 min at the 15-min cadence). |
+| `SGDI_GEO_STABLE_MIN_DWELL_S` | `3600` | Wall-clock floor on a promotion, so bunched ticks can't fake stability. |
+| `SGDI_GEO_COUNT_INTERVAL_S` | `300` | An observation closer than this to the last COUNTED one refreshes `raw_*` but does not count. |
+| `SGDI_GEO_MIN_WITH_IP` | `400` | Stamp gate: minimum validators with a gossip endpoint before a tick is allowed to look fresh. |
+| `SGDI_GEO_EVENT_RETENTION_DAYS` | `90` | `validator_geo_events` retention. |
+| `SGDI_GEO_MASS_CHANGE_ALERT_PCT_PER_TICK` | `0.5` | Pass-side warn threshold (also needs ≥10 promotions in the tick). |
+| `SGDI_GEO_PROMOTE_ALERT_PER_HOUR` | `10` | Watchdog alert on promotions/hour from the events table. |
+| **`SGDI_GEO_FROZEN_FROM_STABLE`** | `true` | **S2 rollback.** `false` reverts 8b's BASE to the instantaneous lookup. |
+| **`SGDI_GEO_FROZEN_MAX_AGE_S`** | `7200` | Run-level: how stale `geo_live_meta.last_tick_at` may be before 8b stops trusting the live view. |
+| **`SGDI_GEO_FROZEN_ROW_MAX_AGE_S`** | `172800` | Row-level: how long a validator may be absent from gossip before its stable tuple stops being frozen in (~1 epoch). |
+
+All are parsed defensively — an empty, unparsable or unrecognised value
+falls back to the default rather than silently changing behaviour, and the
+numeric ones are clamped (`K >= 1`, ages `>= 0`).
+
+### Rollback levers, in order of blast radius
+
+1. **`SGDI_GEO_FROZEN_FROM_STABLE=false`** — 8b takes its base from the
+   instantaneous lookup again, from the next run. The live pass keeps
+   running and `geo-live.json` keeps publishing.
+2. **`SGDI_GEO_LIVE_ENABLED=false`** — stops the live pass. `geo_live_meta`
+   then stops advancing, and within `SGDI_GEO_FROZEN_MAX_AGE_S` (2h) 8b
+   reverts its base on its own. One switch reverts both stages; you do not
+   need to set both.
+3. **Revert the commit** — the only way to go back to raw stored shapes.
+
+⚠ **Scope of levers 1 and 2:** they revert the BASE SELECTION only. The
+canonicalisation of `shadow_*` and of the match flags is deliberately not
+gated — it is shape-only and idempotent through `mergeGeo`, and gating it
+would leave a single epoch's table holding a mix of raw and canonical
+shapes, a third behaviour with no owner.
+
+### Reconstructing per-row provenance
+
+`validator_geo_shadow` has no per-row "was this stable or instantaneous?"
+column — the schema is deliberately untouched, since three repos read it.
+Reconstruct it from the journal and the live tables instead:
+
+- `geo.shadow.persisted` — one line per run: `base` (`stable` /
+  `instantaneous`), `base_reason`, `live_age_s`, `from_stable`,
+  `suppressed_flaps`, plus the match/mismatch counts.
+- `geo.shadow.suppressed_flap` — one line per validator whose recorded
+  tuple differs from the instantaneous lookup that run passed over, with
+  `cand_count`, `observations`, `raw_present`, both tuples and `raw_ip`.
+  Capped at 20 lines per run (`geo.shadow.suppressed_flap.capped` marks the
+  cut); the aggregate counter above is always complete. This is the only
+  place the passed-over IP is recorded — the journal is not publicly served
+  and `gdi-snapshot.db` nulls `ip_used`.
+- `geo.shadow.live_not_ready` (INFO, fresh DB) / `geo.shadow.live_stale`
+  (WARN, genuinely stale or future-dated stamp) — why a run fell back.
+- `validator_geo_events` — `promote` rows explain any divergence that is a
+  genuine relocation rather than a suppressed flap.
+
+Reconciliation rule for the S2 exit gate: **every** difference between the
+frozen photograph and what an instantaneous run would have recorded must
+correspond to a `suppressed_flap` line or a recent `promote` event.
 
 ## Force re-ingest the current epoch
 

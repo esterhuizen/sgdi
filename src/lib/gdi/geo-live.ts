@@ -52,9 +52,16 @@ import {
   canonicalAsn,
   canonicalPassthrough,
 } from './data-sources/merge-geo.ts';
-import type { LocalGeoipResult } from './data-sources/local-geoip.ts';
+import type { GeoLookup, LocalGeoipResult } from './data-sources/local-geoip.ts';
 import type { ModuleLogger } from './logger.ts';
-import type { Storage, ValidatorGeoEventRow, ValidatorGeoLiveRow } from './storage.ts';
+import type {
+  GeoLiveMetaRow,
+  Storage,
+  ValidatorGeoEventRow,
+  ValidatorGeoLiveRow,
+  ValidatorGeoOverrideRow,
+  ValidatorGeoShadowRow,
+} from './storage.ts';
 
 // ── Configuration ──────────────────────────────────────────────────────────
 // Every knob is env-overridable, and every knob is parsed defensively: an
@@ -70,6 +77,19 @@ function envNumber(name: string, fallback: number, min: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, n);
+}
+
+/** Boolean knob, same failure philosophy: unset, empty or unrecognised falls
+ *  back to the default rather than silently flipping behaviour. A rollback
+ *  switch that a typo could turn ON is not a rollback switch. */
+function envFlag(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw == null) return fallback;
+  const v = raw.trim().toLowerCase();
+  if (v === '') return fallback;
+  if (v === 'false' || v === '0' || v === 'no' || v === 'off') return false;
+  if (v === 'true' || v === '1' || v === 'yes' || v === 'on') return true;
+  return fallback;
 }
 
 // K=6 at the 15-min ingest cadence ≈ 90 minutes of agreement before a move is
@@ -128,6 +148,35 @@ const MASS_BOOTSTRAP_WARN_FRACTION = 0.01;
 const MIN_COVERAGE = 0.8;
 const MIN_WITH_IP = envNumber('SGDI_GEO_MIN_WITH_IP', 400, 0);
 
+// ── S2: how stale the live pass may be before the frozen photograph stops
+//    trusting it ─────────────────────────────────────────────────────────────
+// The run-level bound is what lets the LIVE pass's kill switch revert the
+// FROZEN photograph too, without a second lever. Turn the live pass off
+// (SGDI_GEO_LIVE_ENABLED=false), or let it start failing its stamp gate, and
+// geo_live_meta simply stops advancing; within FROZEN_MAX_AGE_S the photograph
+// goes back to taking its BASE from the instantaneous lookup, on its own, with
+// no redeploy. 2h ≈ 8 missed ticks.
+//
+// Scope note, true of SGDI_GEO_FROZEN_FROM_STABLE as well: what reverts is the
+// choice of BASE. The canonicalisation of the stored values and of the match
+// flags is not gated and stays on — see buildShadowRow.
+//
+// Read per call, not at import: these are one-shot scripts, so the cost is nil
+// and an operator's `systemctl set-environment` takes effect on the next run.
+const frozenMaxAgeS = (): number => envNumber('SGDI_GEO_FROZEN_MAX_AGE_S', 7200, 0);
+
+// The row-level bound. A validator that has been out of gossip for longer than
+// this must not have a stale stable tuple frozen into a new epoch's photograph:
+// its instantaneous lookup returns EMPTY, which is exactly what the photograph
+// recorded for it before S2. ~1 epoch (2 days).
+const frozenRowMaxAgeS = (): number => envNumber('SGDI_GEO_FROZEN_ROW_MAX_AGE_S', 172_800, 0);
+
+/** Age bounded to [0, max]. A NEGATIVE age — a clock stepped backwards, a DB
+ *  restored from a future backup, a stamp written by a host with a bad clock —
+ *  is not "very fresh", it is unexplained, and unexplained is not a state in
+ *  which to trust a value that gets frozen for a whole epoch. */
+const ageWithin = (ageS: number, maxS: number): boolean => ageS >= 0 && ageS <= maxS;
+
 /** The debounced unit. All four dimensions move together, nulls included. */
 type GeoTuple = {
   country: string | null;
@@ -183,6 +232,301 @@ function clearCandidate(r: ValidatorGeoLiveRow): void {
   r.cand_asn_name = null;
   r.cand_count = 0;
   r.cand_first_seen = null;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// S2 — what the frozen per-epoch photograph (gdi-ingest step 8b) is a photo OF
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Before S2, step 8b photographed an INSTANTANEOUS MaxMind lookup: whatever
+// gossip said in the one moment, inside the settle window, that the pass
+// happened to run. That is the incident in one sentence — StakeCraft's IP
+// flapped to Frankfurt for a few minutes on 2026-08-26, the settle-window tick
+// landed inside those minutes, and Frankfurt became epoch 1023's truth for the
+// next ~46 hours.
+//
+// After S2 the photograph is of the DEBOUNCED STABLE TUPLE. A flap that has not
+// survived K observations and the dwell floor is, by construction, not what
+// gets photographed — no matter when in the settle window the tick lands.
+//
+// The eligibility rules below are the safety envelope around that. They are
+// deliberately conservative in one direction only: every path that is not
+// clearly better than the pre-S2 behaviour falls back TO the pre-S2 behaviour.
+
+export type FrozenBasePlan = {
+  /** Run-level verdict on whether the live view is fresh enough to read. */
+  useStable: boolean;
+  reason: 'ok' | 'flag_disabled' | 'no_meta' | 'stale_meta';
+  /** Age of the live pass's freshness stamp, in seconds. Null when there is none. */
+  metaAgeS: number | null;
+  maxAgeS: number;
+};
+
+/**
+ * Run-level eligibility: is the live view fresh enough for this ingest run to
+ * read stable tuples out of it at all?
+ *
+ * This verdict is all-or-nothing for the RUN: the live view is either live or
+ * it is not, and that is a property of the pass, not of any one validator. It
+ * does not make the resulting photograph uniform — the row gate in
+ * selectFrozenBase still falls back per validator, so an epoch's table
+ * legitimately mixes stable rows with instantaneous ones. What "one decision"
+ * buys is that the mixture is explained entirely by per-row facts (no live row,
+ * uncorroborated stable, long absence) rather than by the pass's health
+ * flickering mid-loop.
+ */
+export function planFrozenBase(meta: GeoLiveMetaRow | undefined, now: number): FrozenBasePlan {
+  const maxAgeS = frozenMaxAgeS();
+  // The one-env-var rollback. NOTE its exact scope: it reverts the choice of
+  // BASE to the pre-S2 instantaneous lookup. It does not, and must not, gate
+  // the canonicalisation of stored values and match flags — see buildShadowRow.
+  if (!envFlag('SGDI_GEO_FROZEN_FROM_STABLE', true)) {
+    return { useStable: false, reason: 'flag_disabled', metaAgeS: null, maxAgeS };
+  }
+  // No stamp at all: the live pass has never completed a tick. Nothing to read.
+  // A warming-up database, not an incident — the caller logs it accordingly.
+  if (!meta) return { useStable: false, reason: 'no_meta', metaAgeS: null, maxAgeS };
+  const metaAgeS = now - meta.last_tick_at;
+  // A stale stamp means the live view is no longer live. Reading a frozen
+  // "stable" tuple out of a dead pass would reintroduce exactly the class of
+  // bug S1 exists to kill — a stale value presented as current.
+  if (!ageWithin(metaAgeS, maxAgeS)) return { useStable: false, reason: 'stale_meta', metaAgeS, maxAgeS };
+  return { useStable: true, reason: 'ok', metaAgeS, maxAgeS };
+}
+
+export type FrozenBaseSelection = {
+  /** GeoLookup-shaped so the override layering is unchanged by S2. */
+  base: GeoLookup;
+  source: 'stable' | 'instantaneous';
+  /** Why the stable tuple was not used. 'ok' when it was. */
+  fallbackReason: 'ok' | 'run_gate' | 'no_row' | 'no_stable' | 'uncorroborated' | 'absent';
+  /** The stable tuple's corroborating observation count, for the evidence line. */
+  observations: number;
+  candCount: number;
+  /** The live row's recorded IP, when the stable tuple was used. */
+  stableIp: string | null;
+};
+
+/** The pass's own definition of "located": city and org name alone do not
+ *  place a validator in any scored bucket. Used for the stable-usability gate
+ *  and for the evidence predicate, so all three agree. */
+const isPlaced = (t: GeoTuple): boolean => t.country != null || t.asn != null;
+
+/** Equality over the three SCORED dimensions. asn_name is excluded on purpose:
+ *  registry org-name churn ("Hetzner Online GmbH" → "Hetzner Online") moves no
+ *  bucket and must not be reported as a suppressed flap. */
+const scoredEq = (a: GeoTuple, b: GeoTuple): boolean =>
+  a.country === b.country && a.city === b.city && a.asn === b.asn;
+
+/**
+ * Row-level selection. Pure: every input is a value, nothing is read here.
+ *
+ * Falls back to the instantaneous lookup — i.e. to exactly what 8b did before
+ * S2 — whenever the stable tuple is not clearly better:
+ *   - run_gate:        the run-level plan said no
+ *   - no_row:          the validator has no live row yet
+ *   - no_stable:       its stable tuple places it nowhere (no country, no ASN)
+ *   - uncorroborated:  its stable tuple has ZERO observations behind it
+ *   - absent:          it has been out of gossip longer than the row bound
+ * In the last case the instantaneous lookup yields EMPTY, which is precisely
+ * what the photograph would have recorded for an unreachable validator anyway.
+ *
+ * `uncorroborated` is the one that is easy to miss and is the whole ballgame.
+ * A live row bootstrapped from validator_geo_shadow carries
+ * stable_observations = 0: its "stable" tuple is an IMPORT of the previous
+ * epoch's instantaneous photograph, believed by nobody. If a flap was frozen
+ * into that photograph, seeding it and then photographing it back out would
+ * launder the flap into a second epoch under the name "stable" — the very loop
+ * S2 exists to break. Verified against production: StakeCraft's seeded stable
+ * IS its Frankfurt flap value, with observations = 0. Until the live pass has
+ * counted at least one observation agreeing with it, that tuple is not
+ * evidence, and the photograph takes its own instantaneous lookup instead.
+ */
+export function selectFrozenBase(args: {
+  plan: FrozenBasePlan;
+  row: ValidatorGeoLiveRow | undefined;
+  lookup: GeoLookup;
+  now: number;
+}): FrozenBaseSelection {
+  const { plan, row, lookup, now } = args;
+  const instantaneous = (
+    fallbackReason: FrozenBaseSelection['fallbackReason'],
+  ): FrozenBaseSelection => ({
+    base: lookup, source: 'instantaneous', fallbackReason,
+    observations: row?.stable_observations ?? 0, candCount: row?.cand_count ?? 0, stableIp: null,
+  });
+
+  if (!plan.useStable) return instantaneous('run_gate');
+  if (row == null) return instantaneous('no_row');
+
+  const stable = stableOf(row);
+  if (!isPlaced(stable)) return instantaneous('no_stable');
+  if (row.stable_observations <= 0) return instantaneous('uncorroborated');
+  if (row.last_present_at == null || !ageWithin(now - row.last_present_at, frozenRowMaxAgeS())) {
+    return instantaneous('absent');
+  }
+
+  return {
+    base: { country: stable.country, city: stable.city, asn: stable.asn, asn_org: stable.asn_name },
+    source: 'stable',
+    fallbackReason: 'ok',
+    observations: row.stable_observations,
+    candCount: row.cand_count,
+    stableIp: row.ip_used,
+  };
+}
+
+/** What 8b needs to know about a row it just built, for logging and counters.
+ *  Everything here is derived, nothing is re-computed by the caller. */
+export type ShadowEvidence = {
+  source: 'stable' | 'instantaneous';
+  fallbackReason: FrozenBaseSelection['fallbackReason'];
+  /** The photograph is passing over a DIFFERENT instantaneous answer than the
+   *  one it recorded. Every divergence between this artifact and a pre-S2 one
+   *  is either this or a recent promote — that is the reconciliation gate. */
+  suppressedFlap: boolean;
+  /** False when the instantaneous lookup placed the validator nowhere. A
+   *  suppressed flap with raw_present=false is the "frozen while absent" case,
+   *  which is legitimate but distinguishable. */
+  rawPresent: boolean;
+  observations: number;
+  candCount: number;
+  /** The canonicalised instantaneous lookup that was passed over. */
+  raw: GeoTuple;
+  /** The instantaneous IP behind `raw`. Logs only — never a published field. */
+  rawIp: string | null;
+};
+
+/**
+ * Build ONE validator_geo_shadow row exactly as gdi-ingest step 8b writes it.
+ *
+ * This function IS 8b's write path — base selection, override layering,
+ * canonicalisation, match flags, the ip_used tri-state and the evidence
+ * predicate. 8b calls it in its loop and the tests call it directly, so there
+ * is no second copy of the logic to drift out of sync.
+ *
+ * Pure: every input is a value; no I/O, no clock, no env read beyond the
+ * eligibility knobs consulted through selectFrozenBase/planFrozenBase.
+ */
+export function buildShadowRow(args: {
+  plan: FrozenBasePlan;
+  epoch: number;
+  /** The canonical (Stakewiz/VA-derived) side, from the validators table. */
+  validator: {
+    validator_pubkey: string;
+    country: string | null;
+    city: string | null;
+    asn: string | null;
+    asn_name: string | null;
+  };
+  liveRow: ValidatorGeoLiveRow | undefined;
+  /** This tick's instantaneous MaxMind answer, in raw shapes. */
+  lookup: GeoLookup;
+  /** The IP `lookup` came from. */
+  ip: string | null;
+  override: ValidatorGeoOverrideRow | null | undefined;
+  now: number;
+  computedAt: number;
+}): { row: ValidatorGeoShadowRow; evidence: ShadowEvidence } {
+  const { plan, epoch, validator: v, liveRow, lookup, ip, override: ov, now, computedAt } = args;
+
+  const selection = selectFrozenBase({ plan, row: liveRow, lookup, now });
+  const base = selection.base;
+
+  // The evidence predicate compares the recorded tuple against the
+  // CANONICALISED INSTANTANEOUS LOOKUP — what this photograph would have
+  // recorded before S2 — not against the live row's raw_*. raw_* is the last
+  // PRESENT observation, which is stale exactly when the validator is absent
+  // this tick, and would then hide the divergence instead of reporting it.
+  const raw: GeoTuple = {
+    country: canonicalCountry(lookup.country),
+    city: canonicalCity(lookup.city),
+    asn: canonicalAsn(lookup.asn),
+    asn_name: canonicalPassthrough(lookup.asn_org),
+  };
+  const recorded: GeoTuple = {
+    country: canonicalCountry(base.country),
+    city: canonicalCity(base.city),
+    asn: canonicalAsn(base.asn),
+    asn_name: canonicalPassthrough(base.asn_org),
+  };
+  const suppressedFlap = selection.source === 'stable' && !scoredEq(recorded, raw);
+
+  // Per-validator operator override, layered on the base. Each field
+  // independently: override > base. asn_name is overridable too.
+  const merged = ov ? {
+    country: ov.country ?? base.country,
+    city:    ov.city    ?? base.city,
+    asn:     ov.asn     ?? base.asn,
+    asn_org: ov.asn_name ?? base.asn_org,
+  } : base;
+
+  // Canonicalise once, after the override layering, so the STORED shapes are
+  // source-independent: a stable tuple, an instantaneous lookup and an operator
+  // override all land in the same format. This is NOT gated by
+  // SGDI_GEO_FROZEN_FROM_STABLE — gating it would make one epoch's table hold a
+  // mix of raw and canonical shapes, which is a third behaviour nobody asked
+  // for. It is shape-only and idempotent through mergeGeo.
+  const shadow = {
+    country: canonicalCountry(merged.country),
+    city:    canonicalCity(merged.city),
+    asn:     canonicalAsn(merged.asn),
+    asn_org: canonicalPassthrough(merged.asn_org),
+  };
+
+  // Match flags: canonical on BOTH sides, so the comparison is between like and
+  // like. The residual case fold is deliberate — canonicalCity folds known
+  // spelling variants but does not case-fold, and merge-geo's own cityEq
+  // compares case-insensitively.
+  const matchFlag = (a: string | null, b: string | null): number | null => {
+    if (a == null || b == null) return null;
+    return a.toLowerCase() === b.toLowerCase() ? 1 : 0;
+  };
+
+  // ip_used, tri-state. The recorded address must CORROBORATE the recorded geo:
+  // this column exists so a later analyst can re-look-up the address and check
+  // the answer.
+  //   instantaneous  → the address we just looked up
+  //   stable, agreed → the live row's address, which produced this tuple
+  //   stable, flap   → NULL. The live row's address is the flapping one; paired
+  //                    with the pre-flap tuple it would be a row that disproves
+  //                    itself on inspection. NULL is already the value on most
+  //                    rows (1,968 of 2,656 at epoch 1023) and says honestly
+  //                    "no address corroborates this". The suppressed_flap log
+  //                    line carries the passed-over address instead.
+  const ipUsed = selection.source === 'instantaneous' ? ip
+    : suppressedFlap ? null
+    : selection.stableIp;
+
+  return {
+    row: {
+      epoch,
+      validator_pubkey: v.validator_pubkey,
+      ip_used: ipUsed,
+      shadow_country: shadow.country,
+      shadow_city: shadow.city,
+      shadow_asn: shadow.asn,
+      shadow_asn_name: shadow.asn_org,
+      canonical_country: v.country,
+      canonical_city: v.city,
+      canonical_asn: v.asn,
+      canonical_asn_name: v.asn_name,
+      country_match: matchFlag(shadow.country, canonicalCountry(v.country)),
+      city_match:    matchFlag(shadow.city,    canonicalCity(v.city)),
+      asn_match:     matchFlag(shadow.asn,     canonicalAsn(v.asn)),
+      computed_at: computedAt,
+    },
+    evidence: {
+      source: selection.source,
+      fallbackReason: selection.fallbackReason,
+      suppressedFlap,
+      rawPresent: isPlaced(raw),
+      observations: selection.observations,
+      candCount: selection.candCount,
+      raw,
+      rawIp: ip,
+    },
+  };
 }
 
 export type LiveGeoPassInput = {

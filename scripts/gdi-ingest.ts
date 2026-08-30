@@ -28,7 +28,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createLogger } from '../src/lib/gdi/logger.ts';
-import { openStorage, type ValidatorGeoShadowRow } from '../src/lib/gdi/storage.ts';
+import {
+  openStorage,
+  type ValidatorGeoLiveRow,
+  type ValidatorGeoShadowRow,
+} from '../src/lib/gdi/storage.ts';
 import {
   createRpc,
   fetchPoolDelegations,
@@ -44,7 +48,7 @@ import { createDoubleZero } from '../src/lib/gdi/data-sources/doublezero.ts';
 import { createBam } from '../src/lib/gdi/data-sources/bam.ts';
 import { createJupiter, buildMintNameMap } from '../src/lib/gdi/data-sources/jupiter.ts';
 import { enrichValidators } from '../src/lib/gdi/enrichment.ts';
-import { runLiveGeoPass } from '../src/lib/gdi/geo-live.ts';
+import { buildShadowRow, planFrozenBase, runLiveGeoPass } from '../src/lib/gdi/geo-live.ts';
 import { shouldRefreshEpoch } from '../src/lib/gdi/epoch-gate.ts';
 import {
   computePoolScores,
@@ -659,12 +663,31 @@ async function main() {
     }
   }
 
-  // 8b. Shadow-geoip pass — for each tracked validator, look up country / city
-  //     / ASN via the locally-hosted MaxMind databases and persist the result
-  //     alongside a snapshot of canonical for later comparison. Strictly
-  //     additive: NOTHING in the live scoring path reads from
-  //     validator_geo_shadow today. Promotion to canonical is a separate
-  //     change. Best-effort: a failure here can't tank the ingest run.
+  // 8b. Shadow-geoip pass — the FROZEN per-epoch photograph. For each tracked
+  //     validator, take a geo answer and persist it alongside a snapshot of
+  //     canonical for later comparison. Written only while the epoch is still
+  //     inside its settle window, then immutable for the rest of the epoch —
+  //     that freeze is the artifact's purpose, and is unchanged.
+  //
+  //     S2 changed two things. First, the BASE is now the live pass's debounced
+  //     STABLE tuple (src/lib/gdi/geo-live.ts) instead of an instantaneous
+  //     MaxMind lookup, so a gossip-IP flap that happens to land inside the
+  //     settle window can no longer be frozen in as the epoch's truth — the
+  //     2026-08-26 StakeCraft incident, closed at the source. Second, the
+  //     stored values and the match flags are canonicalised through merge-geo
+  //     instead of three weaker local helpers.
+  //
+  //     ROLLBACK SCOPE — be precise about this. SGDI_GEO_FROZEN_FROM_STABLE=
+  //     false (and, equivalently, letting the live pass go stale) reverts the
+  //     BASE SELECTION to the pre-S2 instantaneous lookup. It does NOT revert
+  //     the canonicalisation: shadow_* keeps storing canonical shapes
+  //     ("Hong Kong", "AS46873") and the match flags keep comparing canonical
+  //     against canonical. That is deliberate — the canonicalisation is
+  //     shape-only and idempotent through mergeGeo, and gating it would let one
+  //     epoch's table hold a mix of raw and canonical shapes, a third
+  //     behaviour with no owner. To revert the shapes, revert the commit.
+  //
+  //     Best-effort: a failure here can't tank the ingest run.
   try {
     const { createLocalGeoip } = await import('../src/lib/gdi/data-sources/local-geoip.ts');
     const geoipRes = await createLocalGeoip();
@@ -684,27 +707,39 @@ async function main() {
         if (ip) ipByIdentity.set(n.pubkey, ip);
       }
 
-      // Normalisation helpers — the two sources store equivalent data in
-      // different shapes:
-      //   country: shadow=ISO-2 ("US"), canonical=full name ("United States")
-      //   asn:     shadow=bare number ("20326"), canonical="AS"-prefixed ("AS20326")
-      //   city:    same shape on both, just case/whitespace
-      // We store the RAW shapes in the table (preserves original data for
-      // forensics) but compute the match flags against normalised forms.
-      const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
-      const expandIso2 = (s: string | null): string | null => {
-        if (!s) return s;
-        if (s.length !== 2) return s; // already a name (or unknown shape)
-        try { return regionNames.of(s.toUpperCase()) ?? s; } catch { return s; }
-      };
-      const stripAsPrefix = (s: string | null): string | null => {
-        if (!s) return s;
-        return s.replace(/^AS/i, '');
-      };
-      const eqCi = (a: string | null, b: string | null): number | null => {
-        if (a == null || b == null) return null;
-        return a.trim().toLowerCase() === b.trim().toLowerCase() ? 1 : 0;
-      };
+      // S2: what this photograph is a photo OF. The base is the live pass's
+      // DEBOUNCED STABLE tuple when that is trustworthy, and the instantaneous
+      // lookup otherwise. The run-level freshness verdict is taken ONCE, here;
+      // the per-row fallbacks live in selectFrozenBase, so this epoch's table
+      // legitimately mixes stable rows and instantaneous ones.
+      //
+      // Row construction itself lives in buildShadowRow — one function, shared
+      // with the tests, so there is no second copy of this logic to drift.
+      const frozenNow = nowSeconds();
+      const frozenPlan = planFrozenBase(storage.getGeoLiveMeta(), frozenNow);
+      if (frozenPlan.reason === 'flag_disabled') {
+        log.info('geo.shadow.frozen_from_stable_disabled', {
+          reason: 'SGDI_GEO_FROZEN_FROM_STABLE=false',
+          note: 'base selection reverted; canonicalisation of stored values and match flags is unaffected',
+        });
+      } else if (frozenPlan.reason === 'no_meta') {
+        // A database that has never run the live pass — a fresh install warming
+        // up, not an incident. INFO, not WARN: the watchdog owns "should have
+        // run by now", and crying wolf here would train operators to ignore the
+        // stale warning that does matter.
+        log.info('geo.shadow.live_not_ready', { reason: frozenPlan.reason });
+      } else if (!frozenPlan.useStable) {
+        // The live view exists but is no longer live (or its stamp is in the
+        // future). This run photographs instantaneous lookups, as before S2.
+        log.warn('geo.shadow.live_stale', {
+          reason: frozenPlan.reason,
+          live_age_s: frozenPlan.metaAgeS,
+          max_age_s: frozenPlan.maxAgeS,
+        });
+      }
+      const liveByPubkey: Map<string, ValidatorGeoLiveRow> = frozenPlan.useStable
+        ? new Map(storage.listGeoLiveAll().map((r) => [r.validator_pubkey, r]))
+        : new Map();
 
       // Operator overrides — layered on top of MaxMind for the shadow side
       // ONLY. A null field means "no override for this dimension; use the
@@ -718,52 +753,81 @@ async function main() {
       const shadowRows: ValidatorGeoShadowRow[] = [];
       let matchCount = { country: 0, city: 0, asn: 0 };
       let mismatchCount = { country: 0, city: 0, asn: 0 };
+      let fromStable = 0;
+      let suppressedFlaps = 0;
+      // One INFO line per suppressed flap is the reconciliation evidence, but a
+      // systematic event (a GeoLite2 re-mapping) could make that thousands of
+      // lines in one run. Log the first FLAP_LOG_CAP in full and then only
+      // count — the aggregate below always reports the true total.
+      const FLAP_LOG_CAP = 20;
       for (const v of enriched) {
         const ip = v.identity_pubkey ? ipByIdentity.get(v.identity_pubkey) ?? null : null;
-        const lookup = geoip.lookup(ip);
-
-        // Apply any per-validator override on the shadow side. Each field
-        // independently: override > MaxMind. asn_name is also overridable.
         const ov = overrideByPubkey.get(v.validator_pubkey);
         if (ov) overridesApplied++;
-        const shadow = ov ? {
-          country: ov.country ?? lookup.country,
-          city:    ov.city    ?? lookup.city,
-          asn:     ov.asn     ?? lookup.asn,
-          asn_org: ov.asn_name ?? lookup.asn_org,
-        } : lookup;
 
-        // Match flags computed AFTER normalisation; raw values written below.
-        const country_match = eqCi(expandIso2(shadow.country), v.country);
-        const city_match    = eqCi(shadow.city, v.city);
-        const asn_match     = eqCi(stripAsPrefix(shadow.asn), stripAsPrefix(v.asn));
-
-        if (country_match === 1) matchCount.country++; else if (country_match === 0) mismatchCount.country++;
-        if (city_match    === 1) matchCount.city++;    else if (city_match    === 0) mismatchCount.city++;
-        if (asn_match     === 1) matchCount.asn++;     else if (asn_match     === 0) mismatchCount.asn++;
-
-        shadowRows.push({
+        const { row, evidence } = buildShadowRow({
+          plan: frozenPlan,
           epoch,
-          validator_pubkey: v.validator_pubkey,
-          ip_used: ip,
-          shadow_country: shadow.country,
-          shadow_city: shadow.city,
-          shadow_asn: shadow.asn,
-          shadow_asn_name: shadow.asn_org,
-          canonical_country: v.country,
-          canonical_city: v.city,
-          canonical_asn: v.asn,
-          canonical_asn_name: v.asn_name,
-          country_match,
-          city_match,
-          asn_match,
-          computed_at: nowSeconds(),
+          validator: v,
+          liveRow: liveByPubkey.get(v.validator_pubkey),
+          lookup: geoip.lookup(ip),
+          ip,
+          override: ov,
+          now: frozenNow,
+          computedAt: nowSeconds(),
         });
+
+        if (evidence.source === 'stable') fromStable++;
+        if (row.country_match === 1) matchCount.country++; else if (row.country_match === 0) mismatchCount.country++;
+        if (row.city_match    === 1) matchCount.city++;    else if (row.city_match    === 0) mismatchCount.city++;
+        if (row.asn_match     === 1) matchCount.asn++;     else if (row.asn_match     === 0) mismatchCount.asn++;
+
+        // Reconciliation evidence. Every divergence between this photograph and
+        // what a pre-S2 instantaneous one would have recorded must be
+        // explainable by one of these lines or by a recent promote in
+        // validator_geo_events — that is the exit gate for S2, and this is the
+        // line it greps for. raw_ip lives here and nowhere else: the journal is
+        // not publicly served, and the snapshot nulls ip_used.
+        if (evidence.suppressedFlap) {
+          suppressedFlaps++;
+          if (suppressedFlaps <= FLAP_LOG_CAP) {
+            log.info('geo.shadow.suppressed_flap', {
+              validator: v.validator_pubkey,
+              cand_count: evidence.candCount,
+              observations: evidence.observations,
+              // False ⇒ frozen while the validator is absent from gossip this
+              // tick, which is legitimate but a different story from a flap.
+              raw_present: evidence.rawPresent,
+              stable_country: row.shadow_country,
+              stable_city: row.shadow_city,
+              stable_asn: row.shadow_asn,
+              stable_asn_name: row.shadow_asn_name,
+              raw_country: evidence.raw.country,
+              raw_city: evidence.raw.city,
+              raw_asn: evidence.raw.asn,
+              raw_asn_name: evidence.raw.asn_name,
+              raw_ip: evidence.rawIp,
+            });
+          } else if (suppressedFlaps === FLAP_LOG_CAP + 1) {
+            log.info('geo.shadow.suppressed_flap.capped', {
+              cap: FLAP_LOG_CAP,
+              note: 'further suppressed flaps counted only; see suppressed_flaps in geo.shadow.persisted',
+            });
+          }
+        }
+
+        shadowRows.push(row);
       }
       storage.replaceGeoShadowForEpoch(epoch, shadowRows);
       log.info('geo.shadow.persisted', {
         epoch,
         rows: shadowRows.length,
+        // S2 provenance for this epoch's photograph, in one line.
+        base: frozenPlan.useStable ? 'stable' : 'instantaneous',
+        base_reason: frozenPlan.reason,
+        live_age_s: frozenPlan.metaAgeS,
+        from_stable: fromStable,
+        suppressed_flaps: suppressedFlaps,
         overrides_applied: overridesApplied,
         match_country: matchCount.country, mismatch_country: mismatchCount.country,
         match_city: matchCount.city,       mismatch_city: mismatchCount.city,
