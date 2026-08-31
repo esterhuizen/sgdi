@@ -230,7 +230,27 @@ async function main() {
   const alreadyIngested = storage.isEpochAlreadyIngested(epoch);
   const lastRunStatus = storage.lastRunStatusForEpoch(epoch);
   const minLastUpdateEpoch = storage.minLastUpdateEpochForEpoch(epoch);
-  const epochAgeSeconds = Math.round(epochInfo.slotIndex * APPROX_SLOT_SECONDS);
+  // Epoch age in REAL seconds — from the epoch-start slot's block time, not an assumed
+  // slot duration. Slot times keep falling (400ms era → ~317ms by late Aug 2026, with
+  // further cuts expected), and `slotIndex × constant` OVERestimates age as they fall,
+  // silently compressing the settle window's real-time budget — i.e. eroding the
+  // re-capture protection the settle-gate fix exists for. A block time is exact at any
+  // cadence. On failure keep the constant-based estimate: it errs conservative (can only
+  // end the window early, never hold it open too long). getBlockTime errors on skipped
+  // slots — walk forward to the first block of the epoch.
+  let epochAgeSeconds = Math.round(epochInfo.slotIndex * APPROX_SLOT_SECONDS);
+  try {
+    const startSlot = epochInfo.absoluteSlot - epochInfo.slotIndex;
+    let tStart: number | null = null;
+    for (let off = 0; off < 40 && tStart == null; off++) {
+      tStart = await rpc.call<number | null>('getBlockTime', [startSlot + off]).catch(() => null);
+    }
+    if (tStart != null) {
+      const age = Math.round(Date.now() / 1000 - tStart);
+      // Sanity: a negative age (clock skew) or an absurd one (>14d — wrong slot) keeps the estimate.
+      if (age >= 0 && age < 14 * 86400) epochAgeSeconds = age;
+    }
+  } catch { /* keep the constant-based estimate */ }
   const refreshing = shouldRefreshEpoch({
     alreadyIngested,
     lastRunStatus,
