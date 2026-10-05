@@ -50,6 +50,12 @@ const exec = promisify(execFile);
 const HEARTBEAT_HOURS   = Number(process.env.SGDI_WATCHDOG_HEARTBEAT_HOURS ?? 2);
 const STALE_HOURS       = Number(process.env.SGDI_WATCHDOG_STALE_HOURS ?? 60);
 const ALERT_COOLDOWN_H  = Number(process.env.SGDI_WATCHDOG_COOLDOWN_HOURS ?? 6);
+// Print what would be sent and touch nothing: no Telegram, no state write.
+// Added 2026-10-05 after a manual test run fired a real alert AND wrote the
+// cooldown state, which would have suppressed any genuine alert for the next
+// six hours. A monitor you cannot rehearse safely is a monitor people stop
+// rehearsing — and the cooldown makes a careless test actively dangerous.
+const DRY_RUN = process.argv.includes('--dry-run') || process.env.SGDI_WATCHDOG_DRY_RUN === '1';
 
 // ── Check 3 (SANITY) thresholds ──
 // Added after the 2026-06-10 incident: one bad Stakewiz delinquency sample
@@ -71,6 +77,14 @@ const FLOOR_SCAN_MIN_SOL  = Number(process.env.SGDI_WATCHDOG_FLOOR_SCAN_MIN_SOL 
 // same order as the HEARTBEAT bound, and short enough that a stalled pass is
 // caught long before an epoch's worth of stake decisions is priced off it.
 const GEO_STALE_HOURS   = Number(process.env.SGDI_WATCHDOG_GEO_STALE_HOURS ?? 2);
+
+// ── Check 5 (PUBLIC SITE) ──
+// Checked through the public URL, not localhost, so Cloudflare and nginx are
+// in the path too — a cached 404 at the edge is just as broken as one at the
+// origin. Set to 'off' to disable.
+const SITE_CHECK_URL = process.env.SGDI_WATCHDOG_SITE_URL ?? 'https://gdindex.app/';
+const SITE_EXPECT    = process.env.SGDI_WATCHDOG_SITE_EXPECT ?? 'Decentralisation Index';
+const SITE_TIMEOUT_MS = Number(process.env.SGDI_WATCHDOG_SITE_TIMEOUT_MS ?? 15_000);
 // Promotions in the last hour, counted from validator_geo_events.
 //
 // Counting EVENTS rather than reading geo_live_meta.mass_change_pct is
@@ -386,6 +400,76 @@ async function getTimerLastTriggerMs(): Promise<number | null> {
   }
 }
 
+/**
+ * Check 5: DOES THE PUBLIC SITE ACTUALLY RENDER?
+ *
+ * Every other check in this file asks whether the DATA is fresh. None of them
+ * asks whether anyone can see it. On 2026-08-31 a deploy left gdindex.app
+ * serving Next's "404: This page could not be found." and it stayed that way
+ * for five weeks — through every X post that cited gdindex.app as the source —
+ * while this watchdog reported healthy the entire time, because the ingest was
+ * fine. The data was never the problem.
+ *
+ * It is also why the status code is not the test. That 404 was served under an
+ * HTTP 200: Next had cached a not-found page as the body, so any uptime monitor
+ * watching status codes would have agreed nothing was wrong. We assert on
+ * CONTENT, and we assert both directions — the marker we expect present, and
+ * the 404 text we expect absent — because an empty 200 is its own failure.
+ *
+ * Never throws: a broken check must not take the rest of the watchdog with it.
+ */
+async function runSiteChecks(problems: string[]): Promise<void> {
+  if (SITE_CHECK_URL === 'off') return;
+  let body: string;
+  try {
+    const res = await fetch(SITE_CHECK_URL, {
+      headers: { 'user-agent': 'gdi-watchdog' },
+      signal: AbortSignal.timeout(SITE_TIMEOUT_MS),
+      cache: 'no-store',
+    });
+    body = await res.text();
+    if (!res.ok) {
+      problems.push(
+        `Public site ${SITE_CHECK_URL} returned HTTP ${res.status}. ` +
+        `Check: systemctl status sgdi; curl -sI ${SITE_CHECK_URL}`,
+      );
+      return;
+    }
+  } catch (e) {
+    problems.push(
+      `Public site ${SITE_CHECK_URL} is unreachable: ${(e as Error).message}. ` +
+      `Check: systemctl status sgdi nginx`,
+    );
+    return;
+  }
+
+  // Match the TITLE, not the body. Every healthy Next page embeds the
+  // not-found component in its RSC flight payload, so the literal string
+  // "404: This page could not be found." appears in perfectly good HTML —
+  // a body-wide grep alerts hourly on a healthy site, which is worse than
+  // no alert at all. The rendered <title> is what actually differs.
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(body)?.[1]?.trim() ?? '';
+  if (/^404\b|could not be found/i.test(title)) {
+    problems.push(
+      `Public site ${SITE_CHECK_URL} is serving a 404 PAGE UNDER HTTP 200. ` +
+      `This is the 2026-08-31 failure: the build bakes empty ISR pages, deploy deletes them, ` +
+      `and whatever the first request after restart renders gets cached permanently — ` +
+      `revalidate never replaces a cached not-found. ` +
+      `Fix: redeploy (sudo -u definity bash deploy/deploy.sh), which now smoke-tests and rolls back.`,
+    );
+    return;
+  }
+
+  // Assert on the title too: SITE_EXPECT appears in the flight payload of most
+  // pages on this site, so checking the body alone would pass a wrong page.
+  if (!title.includes(SITE_EXPECT)) {
+    problems.push(
+      `Public site ${SITE_CHECK_URL} rendered ${body.length} bytes with title ${JSON.stringify(title.slice(0, 80))}, ` +
+      `which does not contain ${JSON.stringify(SITE_EXPECT)}. The page is up but may be rendering the wrong thing.`,
+    );
+  }
+}
+
 async function main() {
   const now = Date.now();
   const problems: string[] = [];
@@ -444,6 +528,9 @@ async function main() {
   // ── Check 4: LIVE-GEO PASS (skipped when the pass is switched off)
   if (geoLive) runGeoLiveChecks(problems, geoLive, now);
 
+  // ── Check 5: PUBLIC SITE RENDERS (content, not status code)
+  await runSiteChecks(problems);
+
   if (problems.length === 0) {
     const lastSuccessSummary = lastSuccess
       ? `last success epoch ${lastSuccess.epoch}, ${fmtAge(now - (lastSuccess.finished_at ?? lastSuccess.started_at) * 1000)} ago`
@@ -462,6 +549,10 @@ async function main() {
   console.error(text);
 
   const last = readLastAlert();
+  if (DRY_RUN) {
+    console.log(`[dry-run] would alert with ${problems.length} problem(s); no Telegram sent, no state written.`);
+    return;
+  }
   if (last && now - last.ts_ms < ALERT_COOLDOWN_H * 3_600_000) {
     console.log(
       `watchdog STALE but within cooldown (last alert ${fmtAge(now - last.ts_ms)} ago, ` +

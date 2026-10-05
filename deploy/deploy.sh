@@ -2,8 +2,12 @@
 # Atomic deploy script for SGDI.
 #
 # Usage:
-#   sudo -u definity /var/www/sgdi/deploy.sh                 # builds origin/main, restarts service
-#   sudo -u definity /var/www/sgdi/deploy.sh some-branch     # builds that ref
+#   sudo -u definity bash deploy/deploy.sh                   # builds origin/main, restarts service
+#   sudo -u definity bash deploy/deploy.sh some-branch       # builds that ref
+#
+# Run it from a checkout of this repo. There is no copy at /var/www/sgdi/ —
+# the path this header used to give returns "command not found", which is a
+# poor thing to discover during an incident.
 #
 # Layout produced:
 #   /var/www/sgdi/
@@ -57,12 +61,71 @@ ln -s ../../static ".next/standalone/.next/static"
 # back into the cache.
 find ".next/standalone/.next/server/app" -maxdepth 3 -name "*.html" -delete
 
-# Atomic symlink swap
+# Atomic symlink swap. Remember what we are replacing so the smoke test below
+# has somewhere to roll back to.
+if [[ -L "$APP_ROOT/current" ]]; then
+    ln -sfn "$(readlink -f "$APP_ROOT/current")" "$APP_ROOT/current.prev"
+fi
 ln -sfn "$RELEASE" "$APP_ROOT/current.new"
 mv -Tf "$APP_ROOT/current.new" "$APP_ROOT/current"
 
 echo "==> Reloading service: $SERVICE"
+PREVIOUS_RELEASE="$(readlink -f "$APP_ROOT/current.prev" 2>/dev/null || true)"
 sudo systemctl restart "$SERVICE"
+
+# ── Smoke test, and the reason it exists ────────────────────────────────────
+# The build has no access to /var/lib/sgdi/published/, so every ISR page is
+# baked empty and deleted above. That makes the FIRST REQUEST after restart the
+# one that renders for real and writes the ISR cache — and whatever it produces
+# sticks, because a cached not-found is terminal: `revalidate = 60` never
+# replaces it.
+#
+# On 2026-08-31 that first request produced Next's 404 page. gdindex.app served
+# "404: This page could not be found." under an HTTP 200 for five weeks, through
+# every X post that cited it as the source, and nothing noticed — a status-code
+# health check would have called it healthy the whole time.
+#
+# So the deploy now makes that first request itself, checks what came back, and
+# refuses to leave a broken build live. Warming the cache deliberately is also
+# strictly better than letting a random visitor do it.
+PORT="$(systemctl show "$SERVICE" -p Environment --value | tr ' ' '\n' | sed -n 's/^PORT=//p')"
+PORT="${PORT:-4400}"
+SMOKE_URL="http://127.0.0.1:${PORT}/"
+echo "==> Smoke test: $SMOKE_URL"
+SMOKE_OK=0
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 2
+    BODY="$(curl -fsS --max-time 20 "$SMOKE_URL" 2>/dev/null || true)"
+    [[ -z "$BODY" ]] && continue
+    # Match the <title>, not the body: every healthy Next page embeds the
+    # not-found component in its RSC payload, so "could not be found" appears
+    # in good HTML too. Only the rendered title distinguishes them.
+    TITLE="$(grep -o '"'"'<title[^>]*>[^<]*'"'"' <<<"$BODY" | head -1 | sed 's/.*>//')"
+    if grep -qiE '"'"'^404|could not be found'"'"' <<<"$TITLE"; then
+        echo "    attempt $attempt: served a 404 page (title: $TITLE)"
+        break   # deterministic, not a warm-up race — fail fast
+    fi
+    if grep -qi "Decentralisation Index" <<<"$TITLE"; then
+        echo "    attempt $attempt: OK ($(wc -c <<<"$BODY") bytes)"
+        SMOKE_OK=1
+        break
+    fi
+    echo "    attempt $attempt: unexpected body, retrying"
+done
+
+if [[ "$SMOKE_OK" -ne 1 ]]; then
+    echo "!!! Smoke test FAILED — the homepage does not render."
+    if [[ -n "$PREVIOUS_RELEASE" && -d "$PREVIOUS_RELEASE" ]]; then
+        echo "!!! Rolling back to $PREVIOUS_RELEASE"
+        ln -sfn "$PREVIOUS_RELEASE" "$APP_ROOT/current.new"
+        mv -Tf "$APP_ROOT/current.new" "$APP_ROOT/current"
+        sudo systemctl restart "$SERVICE"
+        echo "!!! Rolled back. The bad build is at $RELEASE for inspection."
+    else
+        echo "!!! No previous release recorded — $SERVICE is live and BROKEN. Fix forward."
+    fi
+    exit 1
+fi
 
 # Purge Cloudflare cache so users see the new build immediately rather
 # than waiting up to 4h for the max-age TTL to expire. /etc/default/sgdi.env
@@ -80,6 +143,7 @@ fi
 
 # Prune old releases
 cd "$APP_ROOT/releases"
-ls -1tr | head -n -"$KEEP_RELEASES" | xargs -r rm -rf
+KEEP_NAME="$(basename "$(readlink -f "$APP_ROOT/current.prev" 2>/dev/null || echo __none__)")"
+ls -1tr | head -n -"$KEEP_RELEASES" | grep -vx "$KEEP_NAME" | xargs -r rm -rf
 
 echo "==> Deployed $RELEASE"
