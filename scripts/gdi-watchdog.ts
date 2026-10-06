@@ -82,6 +82,9 @@ const GEO_STALE_HOURS   = Number(process.env.SGDI_WATCHDOG_GEO_STALE_HOURS ?? 2)
 // Checked through the public URL, not localhost, so Cloudflare and nginx are
 // in the path too — a cached 404 at the edge is just as broken as one at the
 // origin. Set to 'off' to disable.
+// Non-WAL read-only copy, refreshed each ingest. Fallback when the live
+// WAL database refuses a read-only open (see readDb).
+const SNAPSHOT_DB_PATH = process.env.SGDI_SNAPSHOT_DB_PATH ?? '/var/lib/sgdi/published/gdi-snapshot.db';
 const SITE_CHECK_URL = process.env.SGDI_WATCHDOG_SITE_URL ?? 'https://gdindex.app/';
 const SITE_EXPECT    = process.env.SGDI_WATCHDOG_SITE_EXPECT ?? 'Decentralisation Index';
 const SITE_TIMEOUT_MS = Number(process.env.SGDI_WATCHDOG_SITE_TIMEOUT_MS ?? 15_000);
@@ -316,31 +319,50 @@ type DbReads = {
  * about the unreadable DB and the live-geo group degrades to "never run",
  * which is the honest reading — we cannot show that the pass is healthy.
  */
-function readDb(nowMs: number, geoLiveEnabled: boolean): DbReads {
+function readFrom(path: string | undefined, nowMs: number, geoLiveEnabled: boolean): DbReads {
+  const storage = openStorage(path, { readonly: true });
   try {
-    const storage = openStorage(process.env.SGDI_DB_PATH, { readonly: true });
-    try {
-      return {
-        recent: storage.listRecentRuns(20),
-        geoLive: geoLiveEnabled
-          ? {
-              meta: storage.getGeoLiveMeta(),
-              promotesLastHour: storage.countGeoPromotesSince(Math.floor(nowMs / 1000) - 3600),
-            }
-          : null,
-        error: null,
-      };
-    } finally {
-      storage.close();
-    }
-  } catch (e) {
-    const message = (e as Error).message;
-    console.error('watchdog: database read failed:', message);
     return {
-      recent: [],
-      geoLive: geoLiveEnabled ? { meta: undefined, promotesLastHour: 0 } : null,
-      error: message,
+      recent: storage.listRecentRuns(20),
+      geoLive: geoLiveEnabled
+        ? {
+            meta: storage.getGeoLiveMeta(),
+            promotesLastHour: storage.countGeoPromotesSince(Math.floor(nowMs / 1000) - 3600),
+          }
+        : null,
+      error: null,
     };
+  } finally {
+    storage.close();
+  }
+}
+
+/**
+ * The live DB is in WAL mode, and a read-only connection to a WAL database can
+ * fail with "attempt to write a readonly database" — reading WAL needs write
+ * access to the -shm index, so a reader is not purely a reader. It is most
+ * likely to bite right after an ingest write, when WAL state is in flux, which
+ * is exactly when a watchdog runs.
+ *
+ * So: try the live DB, and on failure fall back to the published snapshot,
+ * which is journal_mode=delete and therefore safe to open read-only. The
+ * snapshot is refreshed every ingest cycle, so it can lag by one cycle — the
+ * caller says so rather than presenting it as live.
+ *
+ * This is not hypothetical: it threw twice during manual runs on 2026-10-05.
+ * It had not yet hit the scheduled run, and the point of this is that it never
+ * gets to.
+ */
+function readDb(nowMs: number, geoLiveEnabled: boolean): DbReads & { source: 'live' | 'snapshot' | null } {
+  try {
+    return { ...readFrom(process.env.SGDI_DB_PATH, nowMs, geoLiveEnabled), source: 'live' };
+  } catch (liveErr) {
+    try {
+      return { ...readFrom(SNAPSHOT_DB_PATH, nowMs, geoLiveEnabled), source: 'snapshot' };
+    } catch {
+      // Both unreadable: report the LIVE error, which is the useful one.
+      return { recent: [], geoLive: null, error: (liveErr as Error).message, source: null };
+    }
   }
 }
 
@@ -493,18 +515,34 @@ async function main() {
 
   // ── Checks 2 + 4 read the DB — one guarded open, one close (see readDb).
   const geoLiveEnabled = process.env.SGDI_GEO_LIVE_ENABLED !== 'false';
-  const { recent, geoLive, error: dbError } = readDb(now, geoLiveEnabled);
+  const { recent, geoLive, error: dbError, source: dbSource } = readDb(now, geoLiveEnabled);
+
+  // One fault should read as one fault. When the database cannot be read,
+  // Checks 2 and 4 have nothing to work with and used to emit "No successful
+  // ingest found in the last 0 run records" and "Live-geo pass has never run"
+  // — both of which are restatements of the SAME failure, dressed as two more.
+  // A three-item alert for a single cause trains the reader to skim, and an
+  // alert that gets skimmed is not an alert. So we report the cause and skip
+  // the checks that depend on it.
   if (dbError) {
     problems.push(
-      `Could not read the GDI database at ${process.env.SGDI_DB_PATH ?? '(default path)'}: ${dbError}. ` +
-      `Freshness and live-geo checks are blind this tick; the heartbeat and published-output ` +
-      `checks below still ran. Check the file's existence, ownership and the unit's User=.`,
+      `Could not read the GDI database at ${process.env.SGDI_DB_PATH ?? '(default path)'}, ` +
+      `and the published snapshot at ${SNAPSHOT_DB_PATH} was unreadable too: ${dbError}. ` +
+      `Freshness and live-geo checks are SKIPPED this tick (not failing — blind); the heartbeat, ` +
+      `published-output and public-site checks below still ran. ` +
+      `Check the files' existence, ownership and the unit's User=.`,
     );
+  } else if (dbSource === 'snapshot') {
+    // Not a problem — the fallback did its job. Worth saying out loud so a
+    // reader knows the freshness numbers may lag by one ingest cycle.
+    console.log(`watchdog: live DB unreadable, served freshness checks from ${SNAPSHOT_DB_PATH}`);
   }
 
-  // ── Check 2: DATA FRESHNESS
+  // ── Check 2: DATA FRESHNESS (skipped when the DB could not be read at all)
   const lastSuccess = recent.find((r) => r.status === 'success' || r.status === 'partial');
-  if (!lastSuccess) {
+  if (dbError) {
+    // Nothing to say; the cause is already reported above.
+  } else if (!lastSuccess) {
     problems.push(
       `No successful ingest found in the last ${recent.length} run records. ` +
       `Check: journalctl -u gdi-ingest --since '12 hours ago'`,
@@ -525,8 +563,8 @@ async function main() {
   // ── Check 3: PUBLISHED-OUTPUT SANITY (never throws)
   runSanityChecks(problems);
 
-  // ── Check 4: LIVE-GEO PASS (skipped when the pass is switched off)
-  if (geoLive) runGeoLiveChecks(problems, geoLive, now);
+  // ── Check 4: LIVE-GEO PASS (skipped when switched off, or when the DB is blind)
+  if (!dbError && geoLive) runGeoLiveChecks(problems, geoLive, now);
 
   // ── Check 5: PUBLIC SITE RENDERS (content, not status code)
   await runSiteChecks(problems);
